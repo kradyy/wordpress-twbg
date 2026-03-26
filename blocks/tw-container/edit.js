@@ -1,0 +1,187 @@
+( function ( wp ) {
+    const { registerBlockType } = wp.blocks;
+    const { InnerBlocks, InspectorControls, useBlockProps } = wp.blockEditor;
+    const { PanelBody, TextControl, SelectControl, ToggleControl, TextareaControl, ButtonGroup, Button } = wp.components;
+    const { useState } = wp.element;
+    const { __ } = wp.i18n;
+
+    const BREAKPOINTS = [ 'base', 'sm', 'md', 'lg', 'xl' ];
+    const SPACING_OPTIONS = [ '0', '1', '2', '3', '4', '5', '6', '8', '10', '12', '16', '20', '24', '32', '40', '48', '64' ];
+
+    registerBlockType( 'twgb/tw-container', {
+        edit: function ( { attributes, setAttributes } ) {
+            const { twClasses, tag, rawMode, responsiveAttrs } = attributes;
+            const [ activeBp, setActiveBp ] = useState( 'base' );
+
+            const blockProps = useBlockProps( {
+                className: 'twgb-container-editor ' + twClasses,
+            } );
+
+            function setResponsiveAttr( key, value ) {
+                const updated = { ...responsiveAttrs };
+                if ( ! updated[ key ] ) updated[ key ] = {};
+                updated[ key ][ activeBp ] = value;
+                setAttributes( { responsiveAttrs: updated } );
+                rebuildClasses( updated );
+            }
+
+            function rebuildClasses( attrs ) {
+                const classes = [];
+                Object.keys( attrs ).forEach( function ( key ) {
+                    if ( key === '_raw' ) {
+                        classes.push( ...attrs[ key ] );
+                        return;
+                    }
+                    const bpVals = attrs[ key ];
+                    Object.keys( bpVals ).forEach( function ( bp ) {
+                        const prefix = bp === 'base' ? '' : bp + ':';
+                        const cls = attrToClass( key, bpVals[ bp ] );
+                        if ( cls ) classes.push( prefix + cls );
+                    } );
+                } );
+                setAttributes( { twClasses: classes.join( ' ' ) } );
+            }
+
+            function attrToClass( attr, val ) {
+                const map = {
+                    display: val,
+                    flexDirection: 'flex-' + val,
+                    gap: 'gap-' + val,
+                    padding: 'p-' + val,
+                    paddingX: 'px-' + val,
+                    paddingY: 'py-' + val,
+                    margin: 'm-' + val,
+                    marginX: 'mx-' + val,
+                    marginY: 'my-' + val,
+                    maxWidth: 'max-w-' + val,
+                    bgColor: 'bg-' + val,
+                    borderRadius: val === 'DEFAULT' ? 'rounded' : 'rounded-' + val,
+                };
+                return map[ attr ] || null;
+            }
+
+            function getAttrForBp( key ) {
+                return ( responsiveAttrs[ key ] && responsiveAttrs[ key ][ activeBp ] ) || '';
+            }
+
+            return wp.element.createElement(
+                wp.element.Fragment,
+                null,
+                wp.element.createElement(
+                    InspectorControls,
+                    null,
+                    wp.element.createElement(
+                        PanelBody,
+                        { title: __( 'Container Settings', 'tw-gutenberg-bridge' ) },
+                        wp.element.createElement( SelectControl, {
+                            label: __( 'HTML Tag', 'tw-gutenberg-bridge' ),
+                            value: tag,
+                            options: [
+                                { label: 'div', value: 'div' },
+                                { label: 'section', value: 'section' },
+                                { label: 'article', value: 'article' },
+                                { label: 'main', value: 'main' },
+                                { label: 'aside', value: 'aside' },
+                                { label: 'header', value: 'header' },
+                                { label: 'footer', value: 'footer' },
+                                { label: 'nav', value: 'nav' },
+                            ],
+                            onChange: function ( val ) { setAttributes( { tag: val } ); },
+                        } ),
+                        wp.element.createElement( ToggleControl, {
+                            label: __( 'Raw Tailwind Mode', 'tw-gutenberg-bridge' ),
+                            checked: rawMode,
+                            onChange: function ( val ) {
+                                if ( ! val && window.twgbUtils ) {
+                                    // Leaving raw mode: parse twClasses back into responsiveAttrs.
+                                    var parsed = twgbUtils.parseClasses( twClasses );
+                                    setAttributes( { rawMode: val, responsiveAttrs: parsed } );
+                                } else {
+                                    setAttributes( { rawMode: val } );
+                                }
+                            },
+                        } )
+                    ),
+                    ! rawMode && wp.element.createElement(
+                        PanelBody,
+                        { title: __( 'Responsive Controls', 'tw-gutenberg-bridge' ), initialOpen: true },
+                        wp.element.createElement(
+                            ButtonGroup,
+                            { className: 'twgb-bp-toggle' },
+                            BREAKPOINTS.map( function ( bp ) {
+                                return wp.element.createElement( Button, {
+                                    key: bp,
+                                    isPrimary: activeBp === bp,
+                                    isSecondary: activeBp !== bp,
+                                    onClick: function () { setActiveBp( bp ); },
+                                    className: 'twgb-bp-btn',
+                                }, bp.toUpperCase() );
+                            } )
+                        ),
+                        wp.element.createElement( SelectControl, {
+                            label: __( 'Display', 'tw-gutenberg-bridge' ),
+                            value: getAttrForBp( 'display' ),
+                            options: [
+                                { label: '—', value: '' },
+                                { label: 'Block', value: 'block' },
+                                { label: 'Flex', value: 'flex' },
+                                { label: 'Grid', value: 'grid' },
+                                { label: 'Hidden', value: 'hidden' },
+                            ],
+                            onChange: function ( val ) { setResponsiveAttr( 'display', val ); },
+                        } ),
+                        wp.element.createElement( SelectControl, {
+                            label: __( 'Padding', 'tw-gutenberg-bridge' ),
+                            value: getAttrForBp( 'padding' ),
+                            options: [ { label: '—', value: '' } ].concat(
+                                SPACING_OPTIONS.map( function ( v ) { return { label: v, value: v }; } )
+                            ),
+                            onChange: function ( val ) { setResponsiveAttr( 'padding', val ); },
+                        } ),
+                        wp.element.createElement( SelectControl, {
+                            label: __( 'Gap', 'tw-gutenberg-bridge' ),
+                            value: getAttrForBp( 'gap' ),
+                            options: [ { label: '—', value: '' } ].concat(
+                                SPACING_OPTIONS.map( function ( v ) { return { label: v, value: v }; } )
+                            ),
+                            onChange: function ( val ) { setResponsiveAttr( 'gap', val ); },
+                        } ),
+                        wp.element.createElement( TextControl, {
+                            label: __( 'Max Width', 'tw-gutenberg-bridge' ),
+                            value: getAttrForBp( 'maxWidth' ),
+                            onChange: function ( val ) { setResponsiveAttr( 'maxWidth', val ); },
+                            placeholder: 'e.g. 7xl, screen-xl, prose',
+                        } ),
+                        wp.element.createElement( TextControl, {
+                            label: __( 'Background', 'tw-gutenberg-bridge' ),
+                            value: getAttrForBp( 'bgColor' ),
+                            onChange: function ( val ) { setResponsiveAttr( 'bgColor', val ); },
+                            placeholder: 'e.g. white, gray-100, blue-500',
+                        } )
+                    ),
+                    rawMode && wp.element.createElement(
+                        PanelBody,
+                        { title: __( 'Raw Classes', 'tw-gutenberg-bridge' ), initialOpen: true },
+                        wp.element.createElement( TextareaControl, {
+                            label: __( 'Tailwind Classes', 'tw-gutenberg-bridge' ),
+                            value: twClasses,
+                            onChange: function ( val ) { setAttributes( { twClasses: val } ); },
+                            rows: 4,
+                        } )
+                    )
+                ),
+                wp.element.createElement(
+                    tag || 'div',
+                    blockProps,
+                    wp.element.createElement( InnerBlocks, {
+                        templateLock: false,
+                    } )
+                )
+            );
+        },
+
+        save: function () {
+            return wp.element.createElement( InnerBlocks.Content );
+        },
+    } );
+} )( window.wp );

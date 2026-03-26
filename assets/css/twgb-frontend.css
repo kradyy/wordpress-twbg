@@ -1,0 +1,130 @@
+/* Tailwind Gutenberg Bridge – Frontend Styles */
+
+/* ============================================================
+   1. ALIGNFULL – Break out of theme content wrapper
+   ============================================================ */
+.alignfull {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    margin-left: calc(-50vw + 50%) !important;
+    margin-right: calc(-50vw + 50%) !important;
+    overflow-x: hidden;
+}
+
+/* Reset box-sizing inside our blocks */
+.alignfull *,
+.alignfull *::before,
+.alignfull *::after {
+    box-sizing: border-box;
+}
+
+/* Remove default WordPress block spacing on our blocks */
+.entry-content > .alignfull,
+.wp-block-post-content > .alignfull {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+}
+
+/* ============================================================
+   2. HIDE THEME CHROME (Twenty Twenty-Five / FSE themes)
+   ============================================================ */
+
+/* Hide theme header (site name, nav) */
+body.twgb-landing-page header.wp-block-template-part {
+    display: none !important;
+}
+
+/* Hide theme footer */
+body.twgb-landing-page footer.wp-block-template-part {
+    display: none !important;
+}
+
+/* Hide post title rendered by the theme template */
+body.twgb-landing-page .wp-block-post-title {
+    display: none !important;
+}
+
+/* Hide post meta (author, date, categories) */
+body.twgb-landing-page .wp-block-post-terms,
+body.twgb-landing-page .wp-block-post-date,
+body.twgb-landing-page .wp-block-post-author,
+body.twgb-landing-page .entry-meta,
+body.twgb-landing-page .post-meta {
+    display: none !important;
+}
+
+/* Hide the post meta row in TT5 (has-accent-4-color flex row with author/date/terms) */
+body.twgb-landing-page main > .wp-block-group > .wp-block-group.is-layout-flex {
+    display: none !important;
+}
+
+/* Hide "More posts" section and related elements below post content */
+body.twgb-landing-page .wp-block-query,
+body.twgb-landing-page .wp-block-group.alignwide:has(.wp-block-query),
+body.twgb-landing-page .wp-block-group.alignwide > .wp-block-heading {
+    display: none !important;
+}
+
+/* Also hide by targeting the "More posts" heading directly */
+body.twgb-landing-page .is-layout-constrained > .wp-block-group.alignwide {
+    display: none !important;
+}
+
+/* Hide empty spacer divs after post content */
+body.twgb-landing-page main > .wp-block-group > .wp-block-group:not(.entry-content):not(.wp-block-post-content):not(.is-layout-flex):not(.alignfull) {
+    display: none !important;
+}
+
+/* Hide comments section */
+body.twgb-landing-page .wp-block-comments,
+body.twgb-landing-page .wp-block-post-comments-form {
+    display: none !important;
+}
+
+/* Remove constrained layout so our full-width blocks work */
+body.twgb-landing-page .wp-site-blocks,
+body.twgb-landing-page .wp-site-blocks > *,
+body.twgb-landing-page .is-layout-constrained {
+    max-width: none !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+}
+
+/* Remove vertical padding/gap on the content wrapper */
+body.twgb-landing-page .wp-block-post-content,
+body.twgb-landing-page .entry-content {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: none !important;
+}
+
+/* Remove block gap (WP adds gap between blocks) */
+body.twgb-landing-page .wp-site-blocks > .wp-block-group,
+body.twgb-landing-page main.wp-block-group {
+    gap: 0 !important;
+    padding: 0 !important;
+}
+
+body.twgb-landing-page .wp-site-blocks {
+    padding-top: 0 !important;
+    gap: 0 !important;
+}
+
+body.twgb-landing-page .wp-block-post-content > .alignfull + .alignfull {
+    margin-top: 0 !important;
+}
+
+/* ============================================================
+   3. TAILWIND COMPATIBILITY
+   ============================================================ */
+
+/* Prevent WordPress default link colors from overriding Tailwind */
+.alignfull a {
+    text-decoration: none;
+}
+
+/* Prevent WP default img styles from interfering */
+.alignfull img {
+    max-width: 100%;
+    height: auto;
+}

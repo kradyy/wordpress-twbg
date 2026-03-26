@@ -1,0 +1,52 @@
+{
+    "apiVersion": 2,
+    "$schema": "https://schemas.wp.org/trunk/block.json",
+    "name": "twgb/tw-button",
+    "version": "1.0.0",
+    "title": "TW Button",
+    "category": "twgb",
+    "icon": "button",
+    "description": "Button block with Tailwind utility classes.",
+    "keywords": [
+        "button",
+        "link",
+        "cta",
+        "tailwind"
+    ],
+    "textdomain": "tw-gutenberg-bridge",
+    "supports": {
+        "html": false,
+        "anchor": true
+    },
+    "attributes": {
+        "content": {
+            "type": "string",
+            "default": "Click me"
+        },
+        "href": {
+            "type": "string",
+            "default": ""
+        },
+        "twClasses": {
+            "type": "string",
+            "default": "px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+        },
+        "responsiveAttrs": {
+            "type": "object",
+            "default": {}
+        },
+        "tag": {
+            "type": "string",
+            "default": "a",
+            "enum": [
+                "a",
+                "button"
+            ]
+        },
+        "rawMode": {
+            "type": "boolean",
+            "default": false
+        }
+    },
+    "render": "file:./render.php"
+}
