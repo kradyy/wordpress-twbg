@@ -57,6 +57,22 @@
 .twgb-grid-editor::before { content: 'Grid'; }
 .twgb-flex-editor::before { content: 'Flex'; }
 
+/*
+ * Gutenberg injects two InnerBlocks wrappers in editor:
+ * .block-editor-inner-blocks > .block-editor-block-list__layout
+ * Flatten them so grid/flex/container utilities apply to actual child blocks.
+ */
+.wp-block-twgb-tw-container > .block-editor-inner-blocks,
+.wp-block-twgb-tw-grid > .block-editor-inner-blocks,
+.wp-block-twgb-tw-flex > .block-editor-inner-blocks {
+    display: contents;
+}
+.wp-block-twgb-tw-container > .block-editor-inner-blocks > .block-editor-block-list__layout,
+.wp-block-twgb-tw-grid > .block-editor-inner-blocks > .block-editor-block-list__layout,
+.wp-block-twgb-tw-flex > .block-editor-inner-blocks > .block-editor-block-list__layout {
+    display: contents;
+}
+
 /* Image placeholder */
 .twgb-image-placeholder {
     border: 2px dashed #ccc;

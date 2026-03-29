@@ -59,11 +59,11 @@ class TWGB_Loader {
     }
 
     /**
-     * Register plugin settings under Settings > General.
+     * Register plugin settings under Settings > TW Blocks.
      */
     public static function register_settings() {
         register_setting(
-            'general',
+            'twgb_settings',
             'twgb_editor_jit_enabled',
             [
                 'type'              => 'boolean',
@@ -72,13 +72,79 @@ class TWGB_Loader {
             ]
         );
 
+        register_setting(
+            'twgb_settings',
+            'twgb_frontend_jit_enabled',
+            [
+                'type'              => 'boolean',
+                'sanitize_callback' => [ __CLASS__, 'sanitize_jit_setting' ],
+                'default'           => 0,
+            ]
+        );
+
+        add_settings_section(
+            'twgb_jit_settings',
+            __( 'Tailwind Runtime (JIT)', 'tw-gutenberg-bridge' ),
+            [ __CLASS__, 'render_settings_section_intro' ],
+            'twgb-settings'
+        );
+
         add_settings_field(
             'twgb_editor_jit_enabled',
             __( 'TWGB Editor Tailwind JIT', 'tw-gutenberg-bridge' ),
-            [ __CLASS__, 'render_jit_setting_field' ],
-            'general',
-            'default'
+            [ __CLASS__, 'render_editor_jit_setting_field' ],
+            'twgb-settings',
+            'twgb_jit_settings'
         );
+
+        add_settings_field(
+            'twgb_frontend_jit_enabled',
+            __( 'TWGB Frontend Tailwind JIT', 'tw-gutenberg-bridge' ),
+            [ __CLASS__, 'render_frontend_jit_setting_field' ],
+            'twgb-settings',
+            'twgb_jit_settings'
+        );
+    }
+
+    /**
+     * Add dedicated settings page under Settings menu.
+     */
+    public static function register_settings_page() {
+        add_options_page(
+            __( 'TW Blocks Settings', 'tw-gutenberg-bridge' ),
+            __( 'TW Blocks', 'tw-gutenberg-bridge' ),
+            'manage_options',
+            'twgb-settings',
+            [ __CLASS__, 'render_settings_page' ]
+        );
+    }
+
+    /**
+     * Render section intro copy.
+     */
+    public static function render_settings_section_intro() {
+        echo '<p>' . esc_html__( 'Configure Tailwind Browser JIT behavior for editor and frontend.', 'tw-gutenberg-bridge' ) . '</p>';
+    }
+
+    /**
+     * Render plugin settings page.
+     */
+    public static function render_settings_page() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            return;
+        }
+        ?>
+        <div class="wrap">
+            <h1><?php esc_html_e( 'TW Blocks Settings', 'tw-gutenberg-bridge' ); ?></h1>
+            <form method="post" action="options.php">
+                <?php
+                settings_fields( 'twgb_settings' );
+                do_settings_sections( 'twgb-settings' );
+                submit_button();
+                ?>
+            </form>
+        </div>
+        <?php
     }
 
     /**
@@ -91,7 +157,7 @@ class TWGB_Loader {
     /**
      * Render the checkbox field for editor JIT.
      */
-    public static function render_jit_setting_field() {
+    public static function render_editor_jit_setting_field() {
         $enabled = (int) get_option( 'twgb_editor_jit_enabled', 1 );
         ?>
         <label for="twgb_editor_jit_enabled">
@@ -111,10 +177,39 @@ class TWGB_Loader {
     }
 
     /**
+     * Render the checkbox field for frontend JIT.
+     */
+    public static function render_frontend_jit_setting_field() {
+        $enabled = (int) get_option( 'twgb_frontend_jit_enabled', 0 );
+        ?>
+        <label for="twgb_frontend_jit_enabled">
+            <input
+                type="checkbox"
+                id="twgb_frontend_jit_enabled"
+                name="twgb_frontend_jit_enabled"
+                value="1"
+                <?php checked( 1, $enabled ); ?>
+            />
+            <?php esc_html_e( 'Enable Tailwind Browser JIT on frontend pages that use TWGB blocks.', 'tw-gutenberg-bridge' ); ?>
+        </label>
+        <p class="description">
+            <?php esc_html_e( 'Default is OFF. Enable this only for live preview/development because runtime JIT is not optimized for production.', 'tw-gutenberg-bridge' ); ?>
+        </p>
+        <?php
+    }
+
+    /**
      * Whether editor JIT is enabled.
      */
     public static function is_editor_jit_enabled() {
         return (int) get_option( 'twgb_editor_jit_enabled', 1 ) === 1;
+    }
+
+    /**
+     * Whether frontend JIT is enabled.
+     */
+    public static function is_frontend_jit_enabled() {
+        return (int) get_option( 'twgb_frontend_jit_enabled', 0 ) === 1;
     }
 
     public static function editor_assets() {
@@ -152,6 +247,21 @@ class TWGB_Loader {
         }
 
         self::output_jit_markup_once( true );
+    }
+
+    /**
+     * Output JIT script/style on frontend, when enabled.
+     */
+    public static function output_frontend_jit() {
+        if ( is_admin() || ! self::is_frontend_jit_enabled() ) {
+            return;
+        }
+
+        if ( ! self::current_request_has_twgb_blocks() ) {
+            return;
+        }
+
+        self::output_jit_markup_once( false );
     }
 
     /**
@@ -368,21 +478,29 @@ JS;
 
     public static function frontend_assets() {
         // Only load assets on pages that use our blocks.
-        if ( has_block( 'twgb/tw-container' ) ||
-             has_block( 'twgb/tw-text' ) ||
-             has_block( 'twgb/tw-image' ) ||
-             has_block( 'twgb/tw-button' ) ||
-             has_block( 'twgb/tw-grid' ) ||
-             has_block( 'twgb/tw-flex' ) ) {
-
-            // Frontend layout fixes (alignfull support, reset margins).
-            wp_enqueue_style(
-                'twgb-frontend-style',
-                TWGB_URL . 'assets/css/twgb-frontend.css',
-                [],
-                TWGB_VERSION
-            );
+        if ( ! self::current_request_has_twgb_blocks() ) {
+            return;
         }
+
+        // Frontend layout fixes (alignfull support, reset margins).
+        wp_enqueue_style(
+            'twgb-frontend-style',
+            TWGB_URL . 'assets/css/twgb-frontend.css',
+            [],
+            TWGB_VERSION
+        );
+    }
+
+    /**
+     * Check whether current frontend request contains one of the TWGB blocks.
+     */
+    private static function current_request_has_twgb_blocks() {
+        return has_block( 'twgb/tw-container' ) ||
+            has_block( 'twgb/tw-text' ) ||
+            has_block( 'twgb/tw-image' ) ||
+            has_block( 'twgb/tw-button' ) ||
+            has_block( 'twgb/tw-grid' ) ||
+            has_block( 'twgb/tw-flex' );
     }
 
     public static function register_rest_routes() {
