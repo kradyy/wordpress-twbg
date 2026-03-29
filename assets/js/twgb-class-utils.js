@@ -137,10 +137,66 @@
         return classes.join( ' ' );
     }
 
+    /**
+     * Convert a Tailwind sizing token (e.g. "1/2", "64", "[420px]") to CSS value.
+     */
+    function tailwindSizeToCss( value, axis ) {
+        if ( ! value ) {
+            return '';
+        }
+
+        var arbitraryMatch = value.match( /^\[(.+)\]$/ );
+        if ( arbitraryMatch ) {
+            return arbitraryMatch[1];
+        }
+
+        var keywordMap = {
+            auto: 'auto',
+            full: '100%',
+            min: 'min-content',
+            max: 'max-content',
+            fit: 'fit-content',
+            screen: axis === 'height' ? '100vh' : '100vw',
+        };
+        if ( keywordMap[ value ] ) {
+            return keywordMap[ value ];
+        }
+
+        var fractionMatch = value.match( /^(\d+)\/(\d+)$/ );
+        if ( fractionMatch ) {
+            var numerator = parseFloat( fractionMatch[1] );
+            var denominator = parseFloat( fractionMatch[2] );
+            if ( denominator > 0 ) {
+                return ( ( numerator / denominator ) * 100 ) + '%';
+            }
+        }
+
+        if ( /^-?\d+(?:\.\d+)?$/.test( value ) ) {
+            // Tailwind spacing scale unit (1 => 0.25rem => 4px).
+            return ( parseFloat( value ) * 4 ) + 'px';
+        }
+
+        if ( /^-?\d+(?:\.\d+)?(?:px|rem|em|%|vw|vh)$/.test( value ) ) {
+            return value;
+        }
+
+        return '';
+    }
+
+    /**
+     * Convert a pixel value to Tailwind arbitrary sizing token.
+     */
+    function pixelsToTailwindSize( px ) {
+        var rounded = Math.max( 1, Math.round( Number( px ) || 0 ) );
+        return '[' + rounded + 'px]';
+    }
+
     // Expose globally for block scripts.
     window.twgbUtils = {
         parseClasses: parseClasses,
         attrsToClasses: attrsToClasses,
+        tailwindSizeToCss: tailwindSizeToCss,
+        pixelsToTailwindSize: pixelsToTailwindSize,
     };
 
 } )();
