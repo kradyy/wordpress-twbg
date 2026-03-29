@@ -29,6 +29,9 @@ require_once TWGB_PATH . 'patterns/class-twgb-patterns.php';
 add_action( 'init', [ 'TWGB_Loader', 'init' ] );
 add_action( 'init', [ 'TWGB_Patterns', 'register' ], 20 );
 add_action( 'enqueue_block_editor_assets', [ 'TWGB_Loader', 'editor_assets' ] );
+add_action( 'admin_init', [ 'TWGB_Loader', 'register_settings' ] );
+add_action( 'admin_head', [ 'TWGB_Loader', 'output_editor_jit' ], 1 );
+add_filter( 'block_editor_settings_all', [ 'TWGB_Loader', 'inject_editor_iframe_assets' ], 20, 2 );
 add_action( 'wp_enqueue_scripts', [ 'TWGB_Loader', 'frontend_assets' ] );
 add_action( 'rest_api_init', [ 'TWGB_Loader', 'register_rest_routes' ] );
 
