@@ -67,6 +67,8 @@
         // Font size
         var textMatch = utility.match( /^text-(.+)$/ );
         if ( textMatch ) {
+            var arbitrarySizeMatch = textMatch[1].match( /^\[-?\d*\.?\d+(px|rem|em|%)\]$/ );
+            if ( arbitrarySizeMatch ) return { attr: 'fontSize', bp: bp, val: textMatch[1] };
             if ( FONT_SIZES.indexOf( textMatch[1] ) !== -1 ) return { attr: 'fontSize', bp: bp, val: textMatch[1] };
             if ( ALIGN_VALS.indexOf( textMatch[1] ) !== -1 ) return { attr: 'textAlign', bp: bp, val: textMatch[1] };
             return { attr: 'textColor', bp: bp, val: textMatch[1] };

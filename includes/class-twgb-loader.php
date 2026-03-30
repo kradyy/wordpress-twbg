@@ -8,6 +8,7 @@ class TWGB_Loader {
         'tw-container',
         'tw-text',
         'tw-image',
+        'tw-svg',
         'tw-button',
         'tw-grid',
         'tw-flex',
@@ -16,12 +17,15 @@ class TWGB_Loader {
     private static $jit_markup_output = false;
 
     public static function init() {
+        $class_utils_path = TWGB_PATH . 'assets/js/twgb-class-utils.js';
+        $class_utils_ver  = file_exists( $class_utils_path ) ? filemtime( $class_utils_path ) : TWGB_VERSION;
+
         // Register shared class-parsing utility (loaded before block scripts).
         wp_register_script(
             'twgb-class-utils',
             TWGB_URL . 'assets/js/twgb-class-utils.js',
             [],
-            TWGB_VERSION,
+            $class_utils_ver,
             true
         );
 
@@ -44,11 +48,13 @@ class TWGB_Loader {
 
             // Manually register the editor script so block.json can find it.
             $handle = 'twgb-' . $block . '-editor-script';
+            $edit_js_path = $block_dir . '/edit.js';
+            $edit_js_ver  = file_exists( $edit_js_path ) ? filemtime( $edit_js_path ) : TWGB_VERSION;
             wp_register_script(
                 $handle,
                 TWGB_URL . 'blocks/' . $block . '/edit.js',
                 $editor_deps,
-                TWGB_VERSION,
+                $edit_js_ver,
                 true
             );
 
@@ -371,16 +377,25 @@ class TWGB_Loader {
     private static function read_theme_css_for_browser_runtime() {
         $css = self::read_theme_css();
         if ( '' === trim( $css ) ) {
-            return '';
+            return '@import "tailwindcss" important;';
         }
 
         // Browser runtime should scan current DOM, not file directives.
         $css = preg_replace(
             '/@import\s+["\']tailwindcss["\']\s+source\(none\)\s*;?/i',
-            '@import "tailwindcss";',
+            '@import "tailwindcss" important;',
+            $css
+        ) ?? $css;
+        $css = preg_replace(
+            '/@import\s+["\']tailwindcss["\']\s*;?/i',
+            '@import "tailwindcss" important;',
             $css
         ) ?? $css;
         $css = preg_replace( '/^\s*@source\s+[^;]+;\s*$/mi', '', $css ) ?? $css;
+
+        if ( ! preg_match( '/@import\s+["\']tailwindcss["\']/i', $css ) ) {
+            $css = '@import "tailwindcss" important;' . "\n\n" . $css;
+        }
 
         return trim( $css );
     }
@@ -482,12 +497,24 @@ JS;
             return;
         }
 
+        $frontend_css_rel  = 'assets/css/twgb-frontend.css';
+        $frontend_css_path = TWGB_PATH . $frontend_css_rel;
+        $frontend_css_ver  = file_exists( $frontend_css_path ) ? filemtime( $frontend_css_path ) : TWGB_VERSION;
+
         // Frontend layout fixes (alignfull support, reset margins).
         wp_enqueue_style(
             'twgb-frontend-style',
-            TWGB_URL . 'assets/css/twgb-frontend.css',
+            TWGB_URL . $frontend_css_rel,
             [],
-            TWGB_VERSION
+            $frontend_css_ver
+        );
+
+        // Ensure Space Grotesk weights used by exported typography are available.
+        wp_enqueue_style(
+            'twgb-space-grotesk-font',
+            'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700;800&display=swap',
+            [],
+            null
         );
     }
 
@@ -498,6 +525,7 @@ JS;
         return has_block( 'twgb/tw-container' ) ||
             has_block( 'twgb/tw-text' ) ||
             has_block( 'twgb/tw-image' ) ||
+            has_block( 'twgb/tw-svg' ) ||
             has_block( 'twgb/tw-button' ) ||
             has_block( 'twgb/tw-grid' ) ||
             has_block( 'twgb/tw-flex' );

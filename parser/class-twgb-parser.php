@@ -103,6 +103,12 @@ class TWGB_Parser {
         ];
 
         switch ( $block_type ) {
+            case 'twgb/tw-svg':
+                $attrs['svg'] = trim( $doc->saveHTML( $node ) );
+                $attrs['ariaLabel'] = $node->getAttribute( 'aria-label' ) ?: '';
+                $inner_blocks = []; // svg is a leaf block
+                break;
+
             case 'twgb/tw-image':
                 $attrs['src'] = $node->getAttribute( 'src' );
                 $attrs['alt'] = $node->getAttribute( 'alt' );
@@ -139,6 +145,11 @@ class TWGB_Parser {
      * Detect which block type best fits the element.
      */
     private static function detect_block_type( $tag, $classes, $parsed ) {
+        // Inline SVG.
+        if ( $tag === 'svg' ) {
+            return 'twgb/tw-svg';
+        }
+
         // Images.
         if ( $tag === 'img' ) {
             return 'twgb/tw-image';

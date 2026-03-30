@@ -1,0 +1,39 @@
+{
+    "apiVersion": 2,
+    "$schema": "https://schemas.wp.org/trunk/block.json",
+    "name": "twgb/tw-svg",
+    "version": "1.0.0",
+    "title": "TW SVG",
+    "category": "twgb",
+    "icon": "admin-customizer",
+    "description": "Inline SVG block with Tailwind utility classes.",
+    "keywords": [
+        "svg",
+        "icon",
+        "tailwind"
+    ],
+    "textdomain": "tw-gutenberg-bridge",
+    "supports": {
+        "html": false,
+        "anchor": true
+    },
+    "attributes": {
+        "svg": {
+            "type": "string",
+            "default": ""
+        },
+        "ariaLabel": {
+            "type": "string",
+            "default": ""
+        },
+        "twClasses": {
+            "type": "string",
+            "default": ""
+        },
+        "rawMode": {
+            "type": "boolean",
+            "default": false
+        }
+    },
+    "render": "file:./render.php"
+}

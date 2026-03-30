@@ -153,6 +153,9 @@ class TWGB_Class_Intelligence {
         // Typography.
         $font_sizes = [ 'xs', 'sm', 'base', 'lg', 'xl', '2xl', '3xl', '4xl', '5xl', '6xl', '7xl', '8xl', '9xl' ];
         if ( preg_match( '/^text-(.+)$/', $utility, $m ) ) {
+            if ( preg_match( '/^\[-?\d*\.?\d+(px|rem|em|%)\]$/', $m[1] ) ) {
+                return [ 'attribute' => 'fontSize', 'breakpoint' => $breakpoint, 'value' => $m[1] ];
+            }
             if ( in_array( $m[1], $font_sizes, true ) ) {
                 return [ 'attribute' => 'fontSize', 'breakpoint' => $breakpoint, 'value' => $m[1] ];
             }

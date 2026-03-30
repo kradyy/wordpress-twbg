@@ -125,6 +125,5 @@ body.twgb-landing-page .wp-block-post-content > .alignfull + .alignfull {
 
 /* Prevent WP default img styles from interfering */
 .alignfull img {
-    max-width: 100%;
     height: auto;
 }

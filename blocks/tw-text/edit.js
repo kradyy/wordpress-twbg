@@ -2,7 +2,7 @@
     const { registerBlockType } = wp.blocks;
     const { RichText, InspectorControls, useBlockProps } = wp.blockEditor;
     const { PanelBody, TextControl, SelectControl, ToggleControl, TextareaControl, ButtonGroup, Button } = wp.components;
-    const { useState } = wp.element;
+    const { useState, useEffect } = wp.element;
     const { __ } = wp.i18n;
 
     const BREAKPOINTS = [ 'base', 'sm', 'md', 'lg', 'xl' ];
@@ -128,7 +128,19 @@
             }
 
             function getAttrForBp( key ) {
-                return ( responsiveAttrs && responsiveAttrs[ key ] && responsiveAttrs[ key ][ activeBp ] ) || '';
+                var merged = getWorkingResponsiveAttrs();
+                return ( merged && merged[ key ] && merged[ key ][ activeBp ] ) || '';
+            }
+
+            function getFontSizeOptions() {
+                var options = [ { label: '—', value: '' } ].concat(
+                    FONT_SIZES.map( function ( v ) { return { label: v, value: v }; } )
+                );
+                var current = getAttrForBp( 'fontSize' );
+                if ( current && ! options.some( function ( opt ) { return opt.value === current; } ) ) {
+                    options.push( { label: current, value: current } );
+                }
+                return options;
             }
 
             function getResizeStyle() {
@@ -247,6 +259,40 @@
                 style: { ...( blockProps.style || {} ), ...resizeStyle },
             };
 
+            useEffect( function () {
+                if ( rawMode || ! window.twgbUtils ) {
+                    return;
+                }
+
+                var parsed = twgbUtils.parseClasses( twClasses || '' );
+                if ( ! parsed || Object.keys( parsed ).length === 0 ) {
+                    return;
+                }
+
+                var current = responsiveAttrs || {};
+                var merged = {};
+
+                Object.keys( parsed ).forEach( function ( key ) {
+                    if ( parsed[ key ] && typeof parsed[ key ] === 'object' && ! Array.isArray( parsed[ key ] ) ) {
+                        merged[ key ] = { ...parsed[ key ] };
+                    } else {
+                        merged[ key ] = parsed[ key ];
+                    }
+                } );
+
+                Object.keys( current ).forEach( function ( key ) {
+                    if ( current[ key ] && typeof current[ key ] === 'object' && ! Array.isArray( current[ key ] ) ) {
+                        merged[ key ] = { ...( merged[ key ] || {} ), ...current[ key ] };
+                    } else {
+                        merged[ key ] = current[ key ];
+                    }
+                } );
+
+                if ( JSON.stringify( merged ) !== JSON.stringify( current ) ) {
+                    setAttributes( { responsiveAttrs: merged } );
+                }
+            }, [ rawMode, twClasses, responsiveAttrs ] );
+
             return wp.element.createElement(
                 wp.element.Fragment,
                 null,
@@ -296,9 +342,7 @@
                         wp.element.createElement( SelectControl, {
                             label: __( 'Font Size', 'tw-gutenberg-bridge' ),
                             value: getAttrForBp( 'fontSize' ),
-                            options: [ { label: '—', value: '' } ].concat(
-                                FONT_SIZES.map( function ( v ) { return { label: v, value: v }; } )
-                            ),
+                            options: getFontSizeOptions(),
                             onChange: function ( val ) { setResponsiveAttr( 'fontSize', val ); },
                         } ),
                         wp.element.createElement( SelectControl, {

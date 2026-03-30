@@ -4,7 +4,7 @@ A WordPress plugin that brings Tailwind CSS utility classes into the Gutenberg b
 
 ## What It Does
 
-Tailwind Gutenberg Bridge provides **6 lightweight Gutenberg blocks** (Container, Text, Image, Button, Grid, Flex) that accept arbitrary Tailwind CSS classes. Each block offers two editing modes:
+Tailwind Gutenberg Bridge provides **7 lightweight Gutenberg blocks** (Container, Text, Image, SVG, Button, Grid, Flex) that accept arbitrary Tailwind CSS classes. Each block offers two editing modes:
 
 - **Responsive UI Controls** -- breakpoint-aware dropdowns for spacing, typography, layout, and colors (base / sm / md / lg / xl)
 - **Raw Tailwind Mode** -- a textarea where you paste any Tailwind class string directly
@@ -42,6 +42,7 @@ Search for any block by name in the inserter:
 | **TW Container** | Semantic wrapper (div, section, nav, footer, etc.) | Yes                  |
 | **TW Text**      | Headings, paragraphs, spans, blockquotes           | No                   |
 | **TW Image**     | Images with Tailwind sizing/rounding               | No                   |
+| **TW SVG**       | Inline SVG icons/graphics with Tailwind classes    | No                   |
 | **TW Button**    | Links or buttons with Tailwind styling             | No                   |
 | **TW Grid**      | CSS Grid layout container                          | Yes                  |
 | **TW Flex**      | Flexbox layout container                           | Yes                  |
@@ -76,7 +77,7 @@ blocks/tw-container/
 
 All blocks use **apiVersion 2** and **server-side rendering** via `render.php`. The `edit.js` files are plain JavaScript IIFEs that call `registerBlockType()` directly -- no JSX, no webpack, no build process.
 
-Container blocks (`tw-container`, `tw-grid`, `tw-flex`) use `InnerBlocks` and persist child blocks via `InnerBlocks.Content` in their save function. Leaf blocks (`tw-text`, `tw-image`, `tw-button`) return `null` from save and render entirely via `render.php`.
+Container blocks (`tw-container`, `tw-grid`, `tw-flex`) use `InnerBlocks` and persist child blocks via `InnerBlocks.Content` in their save function. Leaf blocks (`tw-text`, `tw-image`, `tw-svg`, `tw-button`) return `null` from save and render entirely via `render.php`.
 
 ### Responsive Controls
 
@@ -111,9 +112,14 @@ Classes that don't match any known pattern (e.g., `hover:bg-teal-700`, `transiti
 
 ### Tailwind CSS Loading
 
-The plugin loads the **Tailwind CSS CDN (v3.4.17)** in both the editor and the frontend. This is a development convenience -- the CDN scans the DOM for classes and generates CSS on the fly.
+The plugin can load **Tailwind Browser JIT (`@tailwindcss/browser@4`)** and your theme Tailwind CSS at runtime.
 
-For production, install [WindPress](https://wordpress.org/plugins/windpress/) to generate optimized, purged CSS. The plugin detects WindPress automatically and skips the CDN when it's active.
+Under **Settings > TW Blocks**, you can toggle:
+
+- **TWGB Editor Tailwind JIT** (default: ON)
+- **TWGB Frontend Tailwind JIT** (default: OFF)
+
+This runtime JIT is intended for preview/development and is not optimized for production traffic.
 
 ### HTML Import Tool
 
@@ -122,6 +128,7 @@ In the block editor, open the **Options menu (⋮)** and select **Import Tailwin
 - `<div class="flex ...">` → TW Flex
 - `<div class="grid grid-cols-3 ...">` → TW Grid
 - `<img>` → TW Image
+- `<svg>` → TW SVG
 - `<a class="px-4 py-2 bg-blue-500 ...">` → TW Button
 - `<h2 class="text-3xl ...">` → TW Text
 - Other containers → TW Container
@@ -162,6 +169,7 @@ tailwind-gutenberg-bridge/
 │   ├── tw-container/                # Container block (div/section/nav/etc.)
 │   ├── tw-text/                     # Text block (p/h1-h6/span/blockquote)
 │   ├── tw-image/                    # Image block
+│   ├── tw-svg/                      # Inline SVG block
 │   ├── tw-button/                   # Button/link block
 │   ├── tw-grid/                     # CSS Grid block
 │   └── tw-flex/                     # Flexbox block
@@ -227,6 +235,15 @@ Supports: `align` (full, wide), `anchor`
 | `twClasses`       | string  | `""`    | Tailwind utility classes     |
 | `responsiveAttrs` | object  | `{}`    | Structured responsive values |
 | `rawMode`         | boolean | `false` | Toggle raw class editing     |
+
+### TW SVG
+
+| Attribute         | Type    | Default | Description                          |
+| ----------------- | ------- | ------- | ------------------------------------ |
+| `svg`             | string  | `""`    | Inline `<svg>...</svg>` markup       |
+| `ariaLabel`       | string  | `""`    | Optional accessible label            |
+| `twClasses`       | string  | `""`    | Tailwind utility classes on root svg |
+| `rawMode`         | boolean | `false` | Toggle raw class editing             |
 
 ### TW Button
 
