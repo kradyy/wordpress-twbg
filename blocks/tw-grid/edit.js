@@ -181,13 +181,32 @@
                     return { width: nextWidth, height: nextHeight };
                 }
 
+                let rafId = null;
+                let lastMoveEvent = null;
+
                 function onMouseMove( moveEvent ) {
-                    setResizeDraft( getNextSize( moveEvent ) );
+                    lastMoveEvent = moveEvent;
+                    if ( rafId !== null ) {
+                        return;
+                    }
+
+                    rafId = window.requestAnimationFrame( function () {
+                        rafId = null;
+                        if ( ! lastMoveEvent ) {
+                            return;
+                        }
+                        setResizeDraft( getNextSize( lastMoveEvent ) );
+                        lastMoveEvent = null;
+                    } );
                 }
 
                 function onMouseUp( moveEvent ) {
                     document.removeEventListener( 'mousemove', onMouseMove );
                     document.removeEventListener( 'mouseup', onMouseUp );
+                    if ( rafId !== null ) {
+                        window.cancelAnimationFrame( rafId );
+                        rafId = null;
+                    }
 
                     const nextSize = getNextSize( moveEvent );
                     const updated = getWorkingResponsiveAttrs();

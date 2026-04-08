@@ -60,17 +60,31 @@
 /*
  * Gutenberg injects two InnerBlocks wrappers in editor:
  * .block-editor-inner-blocks > .block-editor-block-list__layout
- * Flatten them so grid/flex/container utilities apply to actual child blocks.
+ *
+ * Avoid display: contents here because it can destabilize drag/drop and
+ * selection behavior in large editor documents.
+ * Instead, inherit layout primitives so wrappers mirror container/flex/grid.
  */
 .wp-block-twgb-tw-container > .block-editor-inner-blocks,
 .wp-block-twgb-tw-grid > .block-editor-inner-blocks,
-.wp-block-twgb-tw-flex > .block-editor-inner-blocks {
-    display: contents;
-}
+.wp-block-twgb-tw-flex > .block-editor-inner-blocks,
 .wp-block-twgb-tw-container > .block-editor-inner-blocks > .block-editor-block-list__layout,
 .wp-block-twgb-tw-grid > .block-editor-inner-blocks > .block-editor-block-list__layout,
 .wp-block-twgb-tw-flex > .block-editor-inner-blocks > .block-editor-block-list__layout {
-    display: contents;
+    display: inherit;
+    flex-direction: inherit;
+    flex-wrap: inherit;
+    justify-content: inherit;
+    align-items: inherit;
+    gap: inherit;
+    row-gap: inherit;
+    column-gap: inherit;
+    grid-template-columns: inherit;
+    grid-template-rows: inherit;
+    grid-auto-columns: inherit;
+    grid-auto-rows: inherit;
+    grid-auto-flow: inherit;
+    min-width: 0;
 }
 
 /* Image placeholder */

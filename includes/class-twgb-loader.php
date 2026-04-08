@@ -224,6 +224,9 @@ class TWGB_Loader {
         $asset      = file_exists( $asset_file )
             ? require $asset_file
             : [ 'dependencies' => [], 'version' => TWGB_VERSION ];
+        $editor_css_rel  = 'assets/css/twgb-editor.css';
+        $editor_css_path = TWGB_PATH . $editor_css_rel;
+        $editor_css_ver  = file_exists( $editor_css_path ) ? filemtime( $editor_css_path ) : TWGB_VERSION;
 
         wp_enqueue_script(
             'twgb-editor',
@@ -238,9 +241,9 @@ class TWGB_Loader {
 
         wp_enqueue_style(
             'twgb-editor-style',
-            TWGB_URL . 'assets/css/twgb-editor.css',
+            TWGB_URL . $editor_css_rel,
             [ 'wp-edit-blocks' ],
-            TWGB_VERSION
+            $editor_css_ver
         );
     }
 
@@ -408,23 +411,63 @@ class TWGB_Loader {
         return <<<'JS'
 (function () {
     var refreshTimeout = null;
+    var refreshRaf = null;
     function refreshTailwind() {
         if (window.tailwind && typeof window.tailwind.refresh === 'function') {
             window.tailwind.refresh();
         }
     }
-    function scheduleRefresh() {
+    function scheduleRefresh(delay) {
         if (refreshTimeout) {
             window.clearTimeout(refreshTimeout);
         }
-        refreshTimeout = window.setTimeout(refreshTailwind, 25);
+        refreshTimeout = window.setTimeout(function () {
+            if (refreshRaf) {
+                window.cancelAnimationFrame(refreshRaf);
+            }
+            refreshRaf = window.requestAnimationFrame(function () {
+                refreshRaf = null;
+                refreshTailwind();
+            });
+        }, typeof delay === 'number' ? delay : 120);
     }
-    window.addEventListener('load', scheduleRefresh);
-    document.addEventListener('DOMContentLoaded', scheduleRefresh);
-    var observer = new MutationObserver(scheduleRefresh);
-    observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
-    window.setTimeout(scheduleRefresh, 200);
-    window.setTimeout(scheduleRefresh, 800);
+    function shouldRefresh(records) {
+        var i;
+        for (i = 0; i < records.length; i++) {
+            if (records[i].type === 'childList') {
+                return true;
+            }
+            if (records[i].type === 'attributes' && records[i].attributeName === 'class') {
+                var target = records[i].target;
+                if (!target || target.nodeType !== 1) {
+                    continue;
+                }
+                var className = target.className;
+                if (typeof className !== 'string') {
+                    className = String(className || '');
+                }
+                if (className.indexOf('wp-block-twgb-') !== -1 || className.indexOf('twgb-') !== -1) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    window.addEventListener('load', function () { scheduleRefresh(60); });
+    document.addEventListener('DOMContentLoaded', function () { scheduleRefresh(60); });
+    var observer = new MutationObserver(function (records) {
+        if (shouldRefresh(records)) {
+            scheduleRefresh(120);
+        }
+    });
+    observer.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class']
+    });
+    window.setTimeout(function () { scheduleRefresh(80); }, 200);
+    window.setTimeout(function () { scheduleRefresh(120); }, 800);
 })();
 JS;
     }

@@ -3,10 +3,14 @@
     const { InspectorControls, useBlockProps } = wp.blockEditor;
     const { PanelBody, TextControl, TextareaControl } = wp.components;
     const { __ } = wp.i18n;
+    const INLINE_PREVIEW_MAX_CHARS = 4000;
 
     registerBlockType( 'twgb/tw-svg', {
-        edit: function ( { attributes, setAttributes } ) {
+        edit: function ( { attributes, setAttributes, isSelected } ) {
             const { svg, twClasses, ariaLabel } = attributes;
+            const svgLength = ( svg || '' ).length;
+            const isLargeSvg = svgLength > INLINE_PREVIEW_MAX_CHARS;
+            const shouldRenderPreview = Boolean( svg ) && ( isSelected || ! isLargeSvg );
 
             const blockProps = useBlockProps( {
                 className: 'twgb-svg-editor ' + ( twClasses || '' ),
@@ -43,11 +47,17 @@
                 wp.element.createElement(
                     'div',
                     blockProps,
-                    svg
+                    shouldRenderPreview
                         ? wp.element.createElement( 'div', {
                             className: 'twgb-svg-preview',
                             dangerouslySetInnerHTML: { __html: svg },
                         } )
+                        : svg
+                            ? wp.element.createElement(
+                                'div',
+                                { className: 'twgb-svg-placeholder' },
+                                __( 'SVG preview hidden for performance. Select block to preview.', 'tw-gutenberg-bridge' )
+                            )
                         : wp.element.createElement(
                             'div',
                             { className: 'twgb-svg-placeholder' },
