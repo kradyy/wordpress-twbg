@@ -19,7 +19,7 @@
             return wp.element.createElement(
                 wp.element.Fragment,
                 null,
-                wp.element.createElement(
+                isSelected && wp.element.createElement(
                     InspectorControls,
                     null,
                     wp.element.createElement(

@@ -412,55 +412,117 @@ class TWGB_Loader {
 (function () {
     var refreshTimeout = null;
     var refreshRaf = null;
+    var pointerActive = false;
+    var pendingRefresh = false;
+
     function refreshTailwind() {
         if (window.tailwind && typeof window.tailwind.refresh === 'function') {
             window.tailwind.refresh();
         }
     }
+
+    function elementLooksRelevant(node) {
+        var className;
+        if (!node || node.nodeType !== 1) {
+            return false;
+        }
+        className = node.className;
+        if (typeof className !== 'string') {
+            className = String(className || '');
+        }
+        if (className.indexOf('wp-block-twgb-') !== -1 || className.indexOf('twgb-') !== -1) {
+            return true;
+        }
+        if (typeof node.querySelector === 'function') {
+            return !!node.querySelector('[class*="wp-block-twgb-"], [class*="twgb-"]');
+        }
+        return false;
+    }
+
     function scheduleRefresh(delay) {
+        pendingRefresh = true;
+        if (pointerActive) {
+            return;
+        }
         if (refreshTimeout) {
             window.clearTimeout(refreshTimeout);
         }
         refreshTimeout = window.setTimeout(function () {
+            if (pointerActive) {
+                return;
+            }
             if (refreshRaf) {
                 window.cancelAnimationFrame(refreshRaf);
             }
             refreshRaf = window.requestAnimationFrame(function () {
                 refreshRaf = null;
+                pendingRefresh = false;
                 refreshTailwind();
             });
-        }, typeof delay === 'number' ? delay : 120);
+        }, typeof delay === 'number' ? delay : 180);
+    }
+    function startPointerInteraction() {
+        pointerActive = true;
+        if (refreshTimeout) {
+            window.clearTimeout(refreshTimeout);
+            refreshTimeout = null;
+        }
+    }
+    function endPointerInteraction() {
+        if (!pointerActive) {
+            return;
+        }
+        pointerActive = false;
+        if (pendingRefresh) {
+            scheduleRefresh(90);
+        }
     }
     function shouldRefresh(records) {
         var i;
+        var j;
+        var list;
         for (i = 0; i < records.length; i++) {
             if (records[i].type === 'childList') {
-                return true;
+                if (elementLooksRelevant(records[i].target)) {
+                    return true;
+                }
+                list = records[i].addedNodes || [];
+                for (j = 0; j < list.length; j++) {
+                    if (elementLooksRelevant(list[j])) {
+                        return true;
+                    }
+                }
+                list = records[i].removedNodes || [];
+                for (j = 0; j < list.length; j++) {
+                    if (elementLooksRelevant(list[j])) {
+                        return true;
+                    }
+                }
+                continue;
             }
             if (records[i].type === 'attributes' && records[i].attributeName === 'class') {
-                var target = records[i].target;
-                if (!target || target.nodeType !== 1) {
-                    continue;
-                }
-                var className = target.className;
-                if (typeof className !== 'string') {
-                    className = String(className || '');
-                }
-                if (className.indexOf('wp-block-twgb-') !== -1 || className.indexOf('twgb-') !== -1) {
+                if (elementLooksRelevant(records[i].target)) {
                     return true;
                 }
             }
         }
         return false;
     }
+    document.addEventListener('pointerdown', startPointerInteraction, true);
+    window.addEventListener('pointerup', endPointerInteraction, true);
+    window.addEventListener('pointercancel', endPointerInteraction, true);
+    window.addEventListener('blur', endPointerInteraction);
+    document.addEventListener('dragstart', startPointerInteraction, true);
+    document.addEventListener('dragend', endPointerInteraction, true);
+    document.addEventListener('drop', endPointerInteraction, true);
     window.addEventListener('load', function () { scheduleRefresh(60); });
     document.addEventListener('DOMContentLoaded', function () { scheduleRefresh(60); });
     var observer = new MutationObserver(function (records) {
         if (shouldRefresh(records)) {
-            scheduleRefresh(120);
+            scheduleRefresh(180);
         }
     });
-    observer.observe(document.documentElement, {
+    observer.observe(document.body || document.documentElement, {
         childList: true,
         subtree: true,
         attributes: true,

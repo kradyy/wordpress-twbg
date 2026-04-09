@@ -128,8 +128,7 @@
             }
 
             function getAttrForBp( key ) {
-                var merged = getWorkingResponsiveAttrs();
-                return ( merged && merged[ key ] && merged[ key ][ activeBp ] ) || '';
+                return ( responsiveAttrs && responsiveAttrs[ key ] && responsiveAttrs[ key ][ activeBp ] ) || '';
             }
 
             function getFontSizeOptions() {
@@ -279,7 +278,7 @@
             };
 
             useEffect( function () {
-                if ( rawMode || ! window.twgbUtils ) {
+                if ( rawMode || ! window.twgbUtils || ! isSelected ) {
                     return;
                 }
 
@@ -310,12 +309,12 @@
                 if ( JSON.stringify( merged ) !== JSON.stringify( current ) ) {
                     setAttributes( { responsiveAttrs: merged } );
                 }
-            }, [ rawMode, twClasses, responsiveAttrs ] );
+            }, [ rawMode, twClasses, responsiveAttrs, isSelected ] );
 
             return wp.element.createElement(
                 wp.element.Fragment,
                 null,
-                wp.element.createElement(
+                isSelected && wp.element.createElement(
                     InspectorControls,
                     null,
                     wp.element.createElement(
