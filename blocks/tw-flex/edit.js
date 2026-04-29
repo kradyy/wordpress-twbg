@@ -1,11 +1,19 @@
 ( function ( wp ) {
     const { registerBlockType } = wp.blocks;
     const { InnerBlocks, InspectorControls, useBlockProps } = wp.blockEditor;
-    const { PanelBody, SelectControl, ToggleControl, TextareaControl, ButtonGroup, Button } = wp.components;
+    const { PanelBody, SelectControl, TextControl, ToggleControl, TextareaControl, ButtonGroup, Button } = wp.components;
     const { useState } = wp.element;
+    const { useSelect } = wp.data;
     const { __ } = wp.i18n;
 
     const BREAKPOINTS = [ 'base', 'sm', 'md', 'lg', 'xl' ];
+    const BREAKPOINT_TO_PREVIEW_DEVICE = {
+        base: 'Desktop',
+        sm: 'Mobile',
+        md: 'Tablet',
+        lg: 'Desktop',
+        xl: 'Desktop',
+    };
     const GAP_OPTIONS = [ '0', '1', '2', '3', '4', '5', '6', '8', '10', '12', '16', '20' ];
     const MIN_RESIZE_WIDTH = 80;
     const MIN_RESIZE_HEIGHT = 40;
@@ -53,11 +61,74 @@
         return window.twgbUtils.tailwindSizeToCss( value, axis );
     }
 
+    function getPreviewDeviceTypeFromSelect( select ) {
+        var stores = [ 'core/editor', 'core/edit-post' ];
+
+        for ( var i = 0; i < stores.length; i++ ) {
+            var selectors = null;
+            try {
+                selectors = select( stores[ i ] );
+            } catch ( error ) {
+                continue;
+            }
+
+            if ( ! selectors ) {
+                continue;
+            }
+
+            if ( typeof selectors.getDeviceType === 'function' ) {
+                var stableType = selectors.getDeviceType();
+                if ( stableType ) {
+                    return stableType;
+                }
+            }
+
+            if ( typeof selectors.__experimentalGetPreviewDeviceType === 'function' ) {
+                var experimentalType = selectors.__experimentalGetPreviewDeviceType();
+                if ( experimentalType ) {
+                    return experimentalType;
+                }
+            }
+        }
+
+        return 'Desktop';
+    }
+
+    function setPreviewDeviceType( nextType ) {
+        var stores = [ 'core/editor', 'core/edit-post' ];
+
+        for ( var i = 0; i < stores.length; i++ ) {
+            var actions = null;
+            try {
+                actions = wp.data.dispatch( stores[ i ] );
+            } catch ( error ) {
+                continue;
+            }
+
+            if ( ! actions ) {
+                continue;
+            }
+
+            if ( typeof actions.setDeviceType === 'function' ) {
+                actions.setDeviceType( nextType );
+                return;
+            }
+
+            if ( typeof actions.__experimentalSetPreviewDeviceType === 'function' ) {
+                actions.__experimentalSetPreviewDeviceType( nextType );
+                return;
+            }
+        }
+    }
+
     registerBlockType( 'twgb/tw-flex', {
         edit: function ( { attributes, setAttributes, isSelected } ) {
             const { twClasses, rawMode, responsiveAttrs } = attributes;
             const [ activeBp, setActiveBp ] = useState( 'base' );
             const [ resizeDraft, setResizeDraft ] = useState( null );
+            const previewDeviceType = useSelect( function ( select ) {
+                return getPreviewDeviceTypeFromSelect( select );
+            }, [] );
 
             const blockProps = useBlockProps( {
                 className: 'twgb-flex-editor ' + twClasses,
@@ -130,6 +201,13 @@
 
             function getAttrForBp( key ) {
                 return ( responsiveAttrs && responsiveAttrs[ key ] && responsiveAttrs[ key ][ activeBp ] ) || '';
+            }
+
+            function setActiveBreakpoint( nextBp ) {
+                setActiveBp( nextBp );
+                if ( BREAKPOINT_TO_PREVIEW_DEVICE[ nextBp ] ) {
+                    setPreviewDeviceType( BREAKPOINT_TO_PREVIEW_DEVICE[ nextBp ] );
+                }
             }
 
             function getResizeStyle() {
@@ -292,6 +370,16 @@
                     ! rawMode && wp.element.createElement(
                         PanelBody,
                         { title: __( 'Responsive Flex', 'tw-gutenberg-bridge' ), initialOpen: true },
+                        wp.element.createElement( SelectControl, {
+                            label: __( 'Preview Device', 'tw-gutenberg-bridge' ),
+                            value: previewDeviceType || 'Desktop',
+                            options: [
+                                { label: __( 'Desktop', 'tw-gutenberg-bridge' ), value: 'Desktop' },
+                                { label: __( 'Tablet', 'tw-gutenberg-bridge' ), value: 'Tablet' },
+                                { label: __( 'Mobile', 'tw-gutenberg-bridge' ), value: 'Mobile' },
+                            ],
+                            onChange: function ( nextType ) { setPreviewDeviceType( nextType ); },
+                        } ),
                         wp.element.createElement(
                             ButtonGroup,
                             { className: 'twgb-bp-toggle' },
@@ -300,7 +388,7 @@
                                     key: bp,
                                     isPrimary: activeBp === bp,
                                     isSecondary: activeBp !== bp,
-                                    onClick: function () { setActiveBp( bp ); },
+                                    onClick: function () { setActiveBreakpoint( bp ); },
                                     className: 'twgb-bp-btn',
                                 }, bp.toUpperCase() );
                             } )
@@ -362,6 +450,12 @@
                                 GAP_OPTIONS.map( function ( v ) { return { label: v, value: v }; } )
                             ),
                             onChange: function ( val ) { setResponsiveAttr( 'gap', val ); },
+                        } ),
+                        wp.element.createElement( TextControl, {
+                            label: __( 'Max Width', 'tw-gutenberg-bridge' ),
+                            value: getAttrForBp( 'maxWidth' ),
+                            onChange: function ( val ) { setResponsiveAttr( 'maxWidth', val ); },
+                            placeholder: 'e.g. 7xl, [1312px], screen-xl',
                         } ),
                         wp.element.createElement( SelectControl, {
                             label: __( 'Visibility', 'tw-gutenberg-bridge' ),

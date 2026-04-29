@@ -87,6 +87,16 @@
     min-width: 0;
 }
 
+/*
+ * Inherited flex wrappers can collapse to content width when they become a
+ * single flex item (common in editor DOM), which makes justify-between appear
+ * broken. Force wrapper chain to fill the TW Flex block width.
+ */
+.wp-block-twgb-tw-flex > .block-editor-inner-blocks,
+.wp-block-twgb-tw-flex > .block-editor-inner-blocks > .block-editor-block-list__layout {
+    width: 100%;
+}
+
 /* Image placeholder */
 .twgb-image-placeholder {
     border: 2px dashed #ccc;
