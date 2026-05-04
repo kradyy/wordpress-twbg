@@ -10,6 +10,8 @@ class TWGB_Loader {
 
     private static $jit_markup_output = false;
     private const TAILWIND_ATTRIBUTE = 'twgbTailwind';
+    private const POST_CSS_DIR = 'twgb-page-css';
+    private const POST_CSS_FILE_PREFIX = 'post-';
 
     public static function init() {
         $class_utils_path = TWGB_PATH . 'assets/js/twgb-class-utils.js';
@@ -73,16 +75,6 @@ class TWGB_Loader {
             ]
         );
 
-        register_setting(
-            'twgb_settings',
-            'twgb_frontend_jit_enabled',
-            [
-                'type'              => 'boolean',
-                'sanitize_callback' => [ __CLASS__, 'sanitize_jit_setting' ],
-                'default'           => 0,
-            ]
-        );
-
         add_settings_section(
             'twgb_jit_settings',
             __( 'Tailwind Runtime (JIT)', 'tw-gutenberg-bridge' ),
@@ -98,13 +90,6 @@ class TWGB_Loader {
             'twgb_jit_settings'
         );
 
-        add_settings_field(
-            'twgb_frontend_jit_enabled',
-            __( 'TWGB Frontend Tailwind JIT', 'tw-gutenberg-bridge' ),
-            [ __CLASS__, 'render_frontend_jit_setting_field' ],
-            'twgb-settings',
-            'twgb_jit_settings'
-        );
     }
 
     /**
@@ -124,7 +109,7 @@ class TWGB_Loader {
      * Render section intro copy.
      */
     public static function render_settings_section_intro() {
-        echo '<p>' . esc_html__( 'Configure Tailwind Browser JIT behavior for editor and frontend.', 'tw-gutenberg-bridge' ) . '</p>';
+        echo '<p>' . esc_html__( 'Configure Tailwind Browser JIT behavior for the block editor. Frontend JIT is disabled and frontend CSS is served from saved compiled post files.', 'tw-gutenberg-bridge' ) . '</p>';
     }
 
     /**
@@ -178,39 +163,10 @@ class TWGB_Loader {
     }
 
     /**
-     * Render the checkbox field for frontend JIT.
-     */
-    public static function render_frontend_jit_setting_field() {
-        $enabled = (int) get_option( 'twgb_frontend_jit_enabled', 0 );
-        ?>
-        <label for="twgb_frontend_jit_enabled">
-            <input
-                type="checkbox"
-                id="twgb_frontend_jit_enabled"
-                name="twgb_frontend_jit_enabled"
-                value="1"
-                <?php checked( 1, $enabled ); ?>
-            />
-            <?php esc_html_e( 'Enable Tailwind Browser JIT on frontend pages that use TWGB blocks.', 'tw-gutenberg-bridge' ); ?>
-        </label>
-        <p class="description">
-            <?php esc_html_e( 'Default is OFF. Enable this only for live preview/development because runtime JIT is not optimized for production.', 'tw-gutenberg-bridge' ); ?>
-        </p>
-        <?php
-    }
-
-    /**
      * Whether editor JIT is enabled.
      */
     public static function is_editor_jit_enabled() {
         return (int) get_option( 'twgb_editor_jit_enabled', 1 ) === 1;
-    }
-
-    /**
-     * Whether frontend JIT is enabled.
-     */
-    public static function is_frontend_jit_enabled() {
-        return (int) get_option( 'twgb_frontend_jit_enabled', 0 ) === 1;
     }
 
     public static function editor_assets() {
@@ -253,21 +209,6 @@ class TWGB_Loader {
         }
 
         self::output_jit_markup_once( true );
-    }
-
-    /**
-     * Output JIT script/style on frontend, when enabled.
-     */
-    public static function output_frontend_jit() {
-        if ( is_admin() || ! self::is_frontend_jit_enabled() ) {
-            return;
-        }
-
-        if ( ! self::current_request_has_twgb_blocks() ) {
-            return;
-        }
-
-        self::output_jit_markup_once( false );
     }
 
     /**
@@ -618,6 +559,266 @@ JS;
             [],
             null
         );
+
+        self::enqueue_current_post_compiled_css();
+    }
+
+    /**
+     * Enqueue saved compiled Tailwind CSS for the current singular post.
+     */
+    private static function enqueue_current_post_compiled_css() {
+        if ( ! is_singular() ) {
+            return;
+        }
+
+        $post = get_queried_object();
+        if ( ! $post instanceof WP_Post ) {
+            return;
+        }
+
+        $info = self::get_compiled_css_file_info( (int) $post->ID );
+        if ( ! $info || ! isset( $info['file'], $info['url'] ) ) {
+            return;
+        }
+
+        if ( ! file_exists( $info['file'] ) ) {
+            return;
+        }
+
+        $version = (string) filemtime( $info['file'] );
+        wp_enqueue_style(
+            'twgb-post-style-' . (int) $post->ID,
+            $info['url'],
+            [],
+            $version
+        );
+    }
+
+    /**
+     * Save compiled CSS for a specific post.
+     *
+     * @param int    $post_id Post ID.
+     * @param string $css     CSS contents.
+     * @return bool
+     */
+    private static function save_post_compiled_css( $post_id, $css ) {
+        $post_id = (int) $post_id;
+        if ( $post_id < 1 ) {
+            return false;
+        }
+
+        $css = self::sanitize_compiled_css( $css );
+        if ( '' === $css ) {
+            return false;
+        }
+
+        $info = self::get_compiled_css_file_info( $post_id );
+        if ( ! $info || ! isset( $info['file'] ) ) {
+            return false;
+        }
+
+        if ( ! self::ensure_compiled_css_dir() ) {
+            return false;
+        }
+
+        $header = '/* TWGB compiled Tailwind CSS - post ' . $post_id . ' */' . "\n";
+        $bytes = file_put_contents( $info['file'], $header . $css, LOCK_EX );
+        if ( false === $bytes ) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Delete compiled CSS file for a specific post.
+     *
+     * @param int $post_id Post ID.
+     * @return bool
+     */
+    public static function delete_post_compiled_css( $post_id ) {
+        $post_id = (int) $post_id;
+        if ( $post_id < 1 ) {
+            return false;
+        }
+
+        $info = self::get_compiled_css_file_info( $post_id );
+        if ( ! $info || ! isset( $info['file'] ) ) {
+            return false;
+        }
+
+        if ( ! file_exists( $info['file'] ) ) {
+            return true;
+        }
+
+        return (bool) @unlink( $info['file'] );
+    }
+
+    /**
+     * Remove stale compiled CSS when a post no longer contains TWGB Tailwind data.
+     *
+     * @param int     $post_id Post ID.
+     * @param WP_Post $post    Post object.
+     */
+    public static function maybe_cleanup_post_compiled_css( $post_id, $post ) {
+        $post_id = (int) $post_id;
+        if ( $post_id < 1 || wp_is_post_revision( $post_id ) || wp_is_post_autosave( $post_id ) ) {
+            return;
+        }
+
+        if ( ! $post instanceof WP_Post ) {
+            $post = get_post( $post_id );
+        }
+
+        if ( ! $post instanceof WP_Post ) {
+            return;
+        }
+
+        if ( ! self::post_has_twgb_tailwind_payload( $post ) ) {
+            self::delete_post_compiled_css( $post_id );
+        }
+    }
+
+    /**
+     * REST callback: save compiled CSS produced in the editor.
+     *
+     * @param WP_REST_Request $request Request.
+     * @return WP_REST_Response|WP_Error
+     */
+    public static function rest_save_post_css( $request ) {
+        $post_id = absint( $request->get_param( 'postId' ) );
+        if ( $post_id < 1 ) {
+            return new WP_Error( 'twgb_invalid_post_id', __( 'Invalid post ID.', 'tw-gutenberg-bridge' ), [ 'status' => 400 ] );
+        }
+
+        $post = get_post( $post_id );
+        if ( ! $post instanceof WP_Post ) {
+            return new WP_Error( 'twgb_post_not_found', __( 'Post not found.', 'tw-gutenberg-bridge' ), [ 'status' => 404 ] );
+        }
+
+        if ( ! current_user_can( 'edit_post', $post_id ) ) {
+            return new WP_Error( 'twgb_forbidden', __( 'You are not allowed to edit this post.', 'tw-gutenberg-bridge' ), [ 'status' => 403 ] );
+        }
+
+        $css = self::sanitize_compiled_css( (string) $request->get_param( 'css' ) );
+
+        if ( '' === $css ) {
+            self::delete_post_compiled_css( $post_id );
+            return rest_ensure_response(
+                [
+                    'saved'   => false,
+                    'deleted' => true,
+                ]
+            );
+        }
+
+        if ( ! self::save_post_compiled_css( $post_id, $css ) ) {
+            return new WP_Error( 'twgb_css_write_failed', __( 'Failed to write compiled CSS file.', 'tw-gutenberg-bridge' ), [ 'status' => 500 ] );
+        }
+
+        $info = self::get_compiled_css_file_info( $post_id );
+        $version = ( $info && isset( $info['file'] ) && file_exists( $info['file'] ) )
+            ? (string) filemtime( $info['file'] )
+            : (string) time();
+
+        return rest_ensure_response(
+            [
+                'saved'   => true,
+                'deleted' => false,
+                'url'     => $info['url'] ?? '',
+                'version' => $version,
+            ]
+        );
+    }
+
+    /**
+     * Build deterministic compiled CSS path and URL for a post.
+     *
+     * @param int $post_id Post ID.
+     * @return array<string,string>|null
+     */
+    private static function get_compiled_css_file_info( $post_id ) {
+        $upload_dir = wp_upload_dir();
+        if ( ! isset( $upload_dir['basedir'], $upload_dir['baseurl'] ) ) {
+            return null;
+        }
+
+        $post_id = (int) $post_id;
+        if ( $post_id < 1 ) {
+            return null;
+        }
+
+        $dir = trailingslashit( $upload_dir['basedir'] ) . self::POST_CSS_DIR;
+        $url_dir = trailingslashit( $upload_dir['baseurl'] ) . self::POST_CSS_DIR;
+        $filename = self::POST_CSS_FILE_PREFIX . $post_id . '.css';
+
+        return [
+            'dir'  => $dir,
+            'file' => trailingslashit( $dir ) . $filename,
+            'url'  => trailingslashit( $url_dir ) . $filename,
+        ];
+    }
+
+    /**
+     * Ensure compiled CSS directory exists.
+     *
+     * @return bool
+     */
+    private static function ensure_compiled_css_dir() {
+        $upload_dir = wp_upload_dir();
+        if ( ! isset( $upload_dir['basedir'] ) ) {
+            return false;
+        }
+
+        $dir = trailingslashit( $upload_dir['basedir'] ) . self::POST_CSS_DIR;
+        if ( is_dir( $dir ) ) {
+            return true;
+        }
+
+        return wp_mkdir_p( $dir );
+    }
+
+    /**
+     * Basic CSS sanitizer for compiled output.
+     *
+     * @param string $css Input CSS.
+     * @return string
+     */
+    private static function sanitize_compiled_css( $css ) {
+        $css = str_replace( "\0", '', (string) $css );
+        $css = trim( $css );
+
+        if ( '' === $css ) {
+            return '';
+        }
+
+        // Prevent accidental style-tag breakouts.
+        $css = str_ireplace( '</style', '', $css );
+
+        // Keep payload bounded to avoid oversized REST writes.
+        if ( strlen( $css ) > 2 * MB_IN_BYTES ) {
+            $css = substr( $css, 0, 2 * MB_IN_BYTES );
+        }
+
+        return trim( $css );
+    }
+
+    /**
+     * Check if a post still contains any TWGB Tailwind payload.
+     *
+     * @param WP_Post $post Post object.
+     * @return bool
+     */
+    private static function post_has_twgb_tailwind_payload( $post ) {
+        if ( ! $post instanceof WP_Post || ! is_string( $post->post_content ) ) {
+            return false;
+        }
+
+        if ( has_block( 'twgb/tw-svg', $post ) ) {
+            return true;
+        }
+
+        return false !== strpos( $post->post_content, '"' . self::TAILWIND_ATTRIBUTE . '"' );
     }
 
     /**
@@ -735,6 +936,15 @@ JS;
             'callback'            => [ 'TWGB_Parser', 'rest_parse' ],
             'permission_callback' => function () {
                 return current_user_can( 'edit_posts' );
+            },
+        ] );
+
+        register_rest_route( 'twgb/v1', '/save-post-css', [
+            'methods'             => 'POST',
+            'callback'            => [ __CLASS__, 'rest_save_post_css' ],
+            'permission_callback' => function ( $request ) {
+                $post_id = absint( $request->get_param( 'postId' ) );
+                return $post_id > 0 && current_user_can( 'edit_post', $post_id );
             },
         ] );
     }

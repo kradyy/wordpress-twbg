@@ -35,9 +35,10 @@ add_action( 'admin_init', [ 'TWGB_Loader', 'register_settings' ] );
 add_action( 'admin_menu', [ 'TWGB_Loader', 'register_settings_page' ] );
 add_action( 'admin_head', [ 'TWGB_Loader', 'output_editor_jit' ], 1 );
 add_filter( 'block_editor_settings_all', [ 'TWGB_Loader', 'inject_editor_iframe_assets' ], 20, 2 );
-add_action( 'wp_head', [ 'TWGB_Loader', 'output_frontend_jit' ], 1 );
 add_action( 'wp_enqueue_scripts', [ 'TWGB_Loader', 'frontend_assets' ] );
 add_action( 'rest_api_init', [ 'TWGB_Loader', 'register_rest_routes' ] );
+add_action( 'save_post', [ 'TWGB_Loader', 'maybe_cleanup_post_compiled_css' ], 20, 2 );
+add_action( 'before_delete_post', [ 'TWGB_Loader', 'delete_post_compiled_css' ] );
 
 // Add body class when post uses our landing page blocks (hides theme chrome).
 add_filter( 'body_class', function ( $classes ) {

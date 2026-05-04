@@ -890,6 +890,210 @@
 
   wp.data.subscribe(queueOutlineIndicatorsUpdate);
 
+  function splitClassTokens(value) {
+    return sanitizeClassNamesDraft(value || "")
+      .split(/\s+/)
+      .map(function (token) {
+        return token.trim();
+      })
+      .filter(Boolean);
+  }
+
+  function collectClassesForCssExport(blocks, tokenSet) {
+    if (!Array.isArray(blocks)) {
+      return;
+    }
+
+    blocks.forEach(function (block) {
+      if (!block || typeof block !== "object") {
+        return;
+      }
+
+      var attrs = block.attributes || {};
+      var twAttr =
+        attrs &&
+        typeof attrs === "object" &&
+        attrs[TAILWIND_ATTRIBUTE] &&
+        typeof attrs[TAILWIND_ATTRIBUTE] === "object"
+          ? attrs[TAILWIND_ATTRIBUTE]
+          : null;
+
+      if (twAttr && typeof twAttr.cx === "string") {
+        splitClassTokens(twAttr.cx).forEach(function (token) {
+          tokenSet.add(token);
+        });
+      }
+
+      if (typeof attrs.twClasses === "string") {
+        splitClassTokens(attrs.twClasses).forEach(function (token) {
+          tokenSet.add(token);
+        });
+      }
+
+      if (typeof attrs.className === "string") {
+        splitClassTokens(attrs.className).forEach(function (token) {
+          tokenSet.add(token);
+        });
+      }
+
+      if (Array.isArray(block.innerBlocks) && block.innerBlocks.length) {
+        collectClassesForCssExport(block.innerBlocks, tokenSet);
+      }
+    });
+  }
+
+  function getCurrentPostTailwindTokens() {
+    var blockEditor = select("core/block-editor");
+    if (!blockEditor || typeof blockEditor.getBlocks !== "function") {
+      return [];
+    }
+
+    var blocks = blockEditor.getBlocks();
+    if (!Array.isArray(blocks) || !blocks.length) {
+      return [];
+    }
+
+    var tokenSet = new Set();
+    collectClassesForCssExport(blocks, tokenSet);
+    return Array.from(tokenSet);
+  }
+
+  function getCompiledTailwindCssFromDocument() {
+    var longest = "";
+
+    document.querySelectorAll("style").forEach(function (styleEl) {
+      if (!styleEl || styleEl.id === "twgb-tailwind-editor-theme") {
+        return;
+      }
+
+      var styleType = (styleEl.getAttribute("type") || "").toLowerCase();
+      if (styleType === "text/tailwindcss") {
+        return;
+      }
+
+      var cssText = String(styleEl.textContent || "");
+      if (!cssText) {
+        return;
+      }
+
+      var looksLikeTailwindOutput =
+        cssText.indexOf("tailwindcss v") !== -1 ||
+        cssText.indexOf("--tw-") !== -1;
+
+      if (!looksLikeTailwindOutput) {
+        return;
+      }
+
+      if (cssText.length > longest.length) {
+        longest = cssText;
+      }
+    });
+
+    return longest.trim();
+  }
+
+  var lastPostCssPayloadSignature = "";
+
+  function saveCompiledPostCss() {
+    var editor = select("core/editor");
+    if (!editor || typeof editor.getCurrentPostId !== "function") {
+      return;
+    }
+
+    var postId = parseInt(editor.getCurrentPostId(), 10);
+    if (!postId || postId < 1) {
+      return;
+    }
+
+    var tokens = getCurrentPostTailwindTokens();
+
+    if (window.tailwind && typeof window.tailwind.refresh === "function") {
+      try {
+        window.tailwind.refresh();
+      } catch (err) {}
+    }
+
+    window.setTimeout(function () {
+      var css = tokens.length ? getCompiledTailwindCssFromDocument() : "";
+      if (tokens.length && !css) {
+        // Tailwind runtime might still be compiling; avoid deleting existing CSS on transient misses.
+        return;
+      }
+
+      if (!tokens.length) {
+        css = "";
+      }
+
+      var signature =
+        String(postId) +
+        "|" +
+        tokens.join(" ") +
+        "|" +
+        String(css.length) +
+        "|" +
+        css.slice(0, 160);
+
+      if (signature === lastPostCssPayloadSignature) {
+        return;
+      }
+
+      lastPostCssPayloadSignature = signature;
+
+      wp.apiFetch({
+        path: "/twgb/v1/save-post-css",
+        method: "POST",
+        data: {
+          postId: postId,
+          css: css,
+        },
+      }).catch(function () {});
+    }, 320);
+  }
+
+  var postSaveState = {
+    wasSaving: false,
+    wasAutosaving: false,
+  };
+
+  function maybeSaveCompiledPostCssOnSave() {
+    var editor = select("core/editor");
+    if (!editor || typeof editor.isSavingPost !== "function") {
+      return;
+    }
+
+    var isSaving = !!editor.isSavingPost();
+
+    if (isSaving && !postSaveState.wasSaving) {
+      postSaveState.wasSaving = true;
+      postSaveState.wasAutosaving =
+        typeof editor.isAutosavingPost === "function"
+          ? !!editor.isAutosavingPost()
+          : false;
+      return;
+    }
+
+    if (!isSaving && postSaveState.wasSaving) {
+      var wasAutosaving = postSaveState.wasAutosaving;
+      postSaveState.wasSaving = false;
+      postSaveState.wasAutosaving = false;
+
+      if (wasAutosaving) {
+        return;
+      }
+
+      if (
+        typeof editor.didPostSaveRequestSucceed === "function" &&
+        !editor.didPostSaveRequestSucceed()
+      ) {
+        return;
+      }
+
+      saveCompiledPostCss();
+    }
+  }
+
+  wp.data.subscribe(maybeSaveCompiledPostCssOnSave);
+
   if (
     dispatch("core/blocks") &&
     typeof dispatch("core/blocks").reapplyBlockTypeFilters === "function"
