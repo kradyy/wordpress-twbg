@@ -10,8 +10,7 @@ class TWGB_Loader {
 
     private static $jit_markup_output = false;
     private const TAILWIND_ATTRIBUTE = 'twgbTailwind';
-    private const POST_CSS_DIR = 'twgb-page-css';
-    private const POST_CSS_FILE_PREFIX = 'post-';
+    private const POST_CSS_META_KEY = '_twgb_compiled_css';
 
     public static function init() {
         $class_utils_path = TWGB_PATH . 'assets/js/twgb-class-utils.js';
@@ -109,7 +108,7 @@ class TWGB_Loader {
      * Render section intro copy.
      */
     public static function render_settings_section_intro() {
-        echo '<p>' . esc_html__( 'Configure Tailwind Browser JIT behavior for the block editor. Frontend JIT is disabled and frontend CSS is served from saved compiled post files.', 'tw-gutenberg-bridge' ) . '</p>';
+        echo '<p>' . esc_html__( 'Configure Tailwind Browser JIT behavior for the block editor. Frontend JIT is disabled and frontend CSS is served as inline styles from compiled per-post data stored in post meta.', 'tw-gutenberg-bridge' ) . '</p>';
     }
 
     /**
@@ -564,7 +563,7 @@ JS;
     }
 
     /**
-     * Enqueue saved compiled Tailwind CSS for the current singular post.
+     * Inject saved compiled Tailwind CSS for the current singular post as inline CSS.
      */
     private static function enqueue_current_post_compiled_css() {
         if ( ! is_singular() ) {
@@ -576,26 +575,33 @@ JS;
             return;
         }
 
-        $info = self::get_compiled_css_file_info( (int) $post->ID );
-        if ( ! $info || ! isset( $info['file'], $info['url'] ) ) {
+        $css = self::get_post_compiled_css( (int) $post->ID );
+        if ( '' === $css ) {
             return;
         }
 
-        if ( ! file_exists( $info['file'] ) ) {
-            return;
-        }
-
-        $version = (string) filemtime( $info['file'] );
-        wp_enqueue_style(
-            'twgb-post-style-' . (int) $post->ID,
-            $info['url'],
-            [],
-            $version
-        );
+        wp_add_inline_style( 'twgb-frontend-style', $css );
     }
 
     /**
-     * Save compiled CSS for a specific post.
+     * Read compiled CSS from post meta.
+     *
+     * @param int $post_id Post ID.
+     * @return string
+     */
+    private static function get_post_compiled_css( $post_id ) {
+        $post_id = (int) $post_id;
+        if ( $post_id < 1 ) {
+            return '';
+        }
+
+        $css = get_post_meta( $post_id, self::POST_CSS_META_KEY, true );
+        $css = is_string( $css ) ? self::sanitize_compiled_css( $css ) : '';
+        return $css;
+    }
+
+    /**
+     * Save compiled CSS for a specific post in post meta.
      *
      * @param int    $post_id Post ID.
      * @param string $css     CSS contents.
@@ -612,26 +618,27 @@ JS;
             return false;
         }
 
-        $info = self::get_compiled_css_file_info( $post_id );
-        if ( ! $info || ! isset( $info['file'] ) ) {
-            return false;
+        $current = get_post_meta( $post_id, self::POST_CSS_META_KEY, true );
+        $current = is_string( $current ) ? self::sanitize_compiled_css( $current ) : '';
+        if ( $current === $css ) {
+            return true;
         }
 
-        if ( ! self::ensure_compiled_css_dir() ) {
-            return false;
-        }
-
-        $header = '/* TWGB compiled Tailwind CSS - post ' . $post_id . ' */' . "\n";
-        $bytes = file_put_contents( $info['file'], $header . $css, LOCK_EX );
-        if ( false === $bytes ) {
-            return false;
+        // Keep escaped selectors like `.md\:block` intact (WordPress strips slashes on meta save).
+        $saved = update_post_meta( $post_id, self::POST_CSS_META_KEY, wp_slash( $css ) );
+        if ( false === $saved ) {
+            $reloaded = get_post_meta( $post_id, self::POST_CSS_META_KEY, true );
+            $reloaded = is_string( $reloaded ) ? self::sanitize_compiled_css( $reloaded ) : '';
+            if ( $reloaded !== $css ) {
+                return false;
+            }
         }
 
         return true;
     }
 
     /**
-     * Delete compiled CSS file for a specific post.
+     * Delete compiled CSS for a specific post from meta.
      *
      * @param int $post_id Post ID.
      * @return bool
@@ -642,16 +649,9 @@ JS;
             return false;
         }
 
-        $info = self::get_compiled_css_file_info( $post_id );
-        if ( ! $info || ! isset( $info['file'] ) ) {
-            return false;
-        }
+        delete_post_meta( $post_id, self::POST_CSS_META_KEY );
 
-        if ( ! file_exists( $info['file'] ) ) {
-            return true;
-        }
-
-        return (bool) @unlink( $info['file'] );
+        return true;
     }
 
     /**
@@ -713,69 +713,20 @@ JS;
         }
 
         if ( ! self::save_post_compiled_css( $post_id, $css ) ) {
-            return new WP_Error( 'twgb_css_write_failed', __( 'Failed to write compiled CSS file.', 'tw-gutenberg-bridge' ), [ 'status' => 500 ] );
+            return new WP_Error( 'twgb_css_store_failed', __( 'Failed to store compiled CSS.', 'tw-gutenberg-bridge' ), [ 'status' => 500 ] );
         }
 
-        $info = self::get_compiled_css_file_info( $post_id );
-        $version = ( $info && isset( $info['file'] ) && file_exists( $info['file'] ) )
-            ? (string) filemtime( $info['file'] )
-            : (string) time();
+        $stored_css = self::get_post_compiled_css( $post_id );
+        $version = '' !== $stored_css ? md5( $stored_css ) : (string) time();
 
         return rest_ensure_response(
             [
                 'saved'   => true,
                 'deleted' => false,
-                'url'     => $info['url'] ?? '',
+                'size'    => strlen( $stored_css ),
                 'version' => $version,
             ]
         );
-    }
-
-    /**
-     * Build deterministic compiled CSS path and URL for a post.
-     *
-     * @param int $post_id Post ID.
-     * @return array<string,string>|null
-     */
-    private static function get_compiled_css_file_info( $post_id ) {
-        $upload_dir = wp_upload_dir();
-        if ( ! isset( $upload_dir['basedir'], $upload_dir['baseurl'] ) ) {
-            return null;
-        }
-
-        $post_id = (int) $post_id;
-        if ( $post_id < 1 ) {
-            return null;
-        }
-
-        $dir = trailingslashit( $upload_dir['basedir'] ) . self::POST_CSS_DIR;
-        $url_dir = trailingslashit( $upload_dir['baseurl'] ) . self::POST_CSS_DIR;
-        $filename = self::POST_CSS_FILE_PREFIX . $post_id . '.css';
-
-        return [
-            'dir'  => $dir,
-            'file' => trailingslashit( $dir ) . $filename,
-            'url'  => trailingslashit( $url_dir ) . $filename,
-        ];
-    }
-
-    /**
-     * Ensure compiled CSS directory exists.
-     *
-     * @return bool
-     */
-    private static function ensure_compiled_css_dir() {
-        $upload_dir = wp_upload_dir();
-        if ( ! isset( $upload_dir['basedir'] ) ) {
-            return false;
-        }
-
-        $dir = trailingslashit( $upload_dir['basedir'] ) . self::POST_CSS_DIR;
-        if ( is_dir( $dir ) ) {
-            return true;
-        }
-
-        return wp_mkdir_p( $dir );
     }
 
     /**
