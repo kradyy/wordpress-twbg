@@ -5,16 +5,11 @@
 class TWGB_Loader {
 
     private static $blocks = [
-        'tw-container',
-        'tw-text',
-        'tw-image',
         'tw-svg',
-        'tw-button',
-        'tw-grid',
-        'tw-flex',
     ];
 
     private static $jit_markup_output = false;
+    private const TAILWIND_ATTRIBUTE = 'twgbTailwind';
 
     public static function init() {
         $class_utils_path = TWGB_PATH . 'assets/js/twgb-class-utils.js';
@@ -224,6 +219,8 @@ class TWGB_Loader {
         $asset      = file_exists( $asset_file )
             ? require $asset_file
             : [ 'dependencies' => [], 'version' => TWGB_VERSION ];
+        $editor_js_path  = TWGB_PATH . 'assets/js/twgb-editor.js';
+        $editor_js_ver   = file_exists( $editor_js_path ) ? filemtime( $editor_js_path ) : $asset['version'];
         $editor_css_rel  = 'assets/css/twgb-editor.css';
         $editor_css_path = TWGB_PATH . $editor_css_rel;
         $editor_css_ver  = file_exists( $editor_css_path ) ? filemtime( $editor_css_path ) : TWGB_VERSION;
@@ -232,10 +229,10 @@ class TWGB_Loader {
             'twgb-editor',
             TWGB_URL . 'assets/js/twgb-editor.js',
             array_merge(
-                [ 'wp-blocks', 'wp-element', 'wp-block-editor', 'wp-components', 'wp-i18n', 'wp-compose', 'wp-data' ],
+                [ 'wp-blocks', 'wp-element', 'wp-hooks', 'wp-block-editor', 'wp-components', 'wp-i18n', 'wp-compose', 'wp-data', 'wp-api-fetch', 'wp-plugins', 'wp-edit-post', 'twgb-class-utils' ],
                 $asset['dependencies']
             ),
-            $asset['version'],
+            $editor_js_ver,
             true
         );
 
@@ -430,11 +427,11 @@ class TWGB_Loader {
         if (typeof className !== 'string') {
             className = String(className || '');
         }
-        if (className.indexOf('wp-block-twgb-') !== -1 || className.indexOf('twgb-') !== -1) {
+        if (className.indexOf('wp-block') !== -1 || className.indexOf('twgb-') !== -1) {
             return true;
         }
         if (typeof node.querySelector === 'function') {
-            return !!node.querySelector('[class*="wp-block-twgb-"], [class*="twgb-"]');
+            return !!node.querySelector('[class*="wp-block"], [class*="twgb-"]');
         }
         return false;
     }
@@ -627,13 +624,109 @@ JS;
      * Check whether current frontend request contains one of the TWGB blocks.
      */
     private static function current_request_has_twgb_blocks() {
-        return has_block( 'twgb/tw-container' ) ||
-            has_block( 'twgb/tw-text' ) ||
-            has_block( 'twgb/tw-image' ) ||
-            has_block( 'twgb/tw-svg' ) ||
-            has_block( 'twgb/tw-button' ) ||
-            has_block( 'twgb/tw-grid' ) ||
-            has_block( 'twgb/tw-flex' );
+        if ( has_block( 'twgb/tw-svg' ) ) {
+            return true;
+        }
+
+        if ( ! is_singular() ) {
+            return false;
+        }
+
+        $post = get_queried_object();
+        if ( ! $post instanceof WP_Post ) {
+            return false;
+        }
+
+        if ( ! is_string( $post->post_content ) || '' === $post->post_content ) {
+            return false;
+        }
+
+        return false !== strpos( $post->post_content, '"' . self::TAILWIND_ATTRIBUTE . '"' );
+    }
+
+    /**
+     * Add TWGB Tailwind attribute to blocks that support custom class names.
+     */
+    public static function register_block_type_args( $args, $name ) {
+        if ( ! is_string( $name ) || '' === $name ) {
+            return $args;
+        }
+
+        if ( ! isset( $args['attributes'] ) || ! is_array( $args['attributes'] ) ) {
+            $args['attributes'] = [];
+        }
+
+        if ( ! isset( $args['attributes'][ self::TAILWIND_ATTRIBUTE ] ) ) {
+            $args['attributes'][ self::TAILWIND_ATTRIBUTE ] = [
+                'type' => 'object',
+            ];
+        }
+
+        return $args;
+    }
+
+    /**
+     * Apply TWGB Tailwind classes to rendered blocks server-side.
+     */
+    public static function render_block( $block_content, $block ) {
+        if ( ! is_array( $block ) || ! isset( $block['attrs'] ) || ! is_array( $block['attrs'] ) ) {
+            return $block_content;
+        }
+
+        $tailwind = self::get_tailwind_attribute( $block['attrs'] );
+        $class_names = trim( (string) ( $tailwind['cx'] ?? '' ) );
+        if ( '' === $class_names || '' === trim( (string) $block_content ) ) {
+            return $block_content;
+        }
+
+        if ( ! class_exists( 'WP_HTML_Tag_Processor' ) ) {
+            return $block_content;
+        }
+
+        $processor = new WP_HTML_Tag_Processor( $block_content );
+        if ( ! $processor->next_tag() ) {
+            return $block_content;
+        }
+
+        $merged = self::merge_class_names( (string) $processor->get_attribute( 'class' ), $class_names );
+        if ( '' === $merged ) {
+            return $block_content;
+        }
+
+        $processor->set_attribute( 'class', $merged );
+        return $processor->get_updated_html();
+    }
+
+    /**
+     * Read and sanitize the Tailwind attribute payload.
+     */
+    private static function get_tailwind_attribute( $attrs ) {
+        if ( ! is_array( $attrs ) ) {
+            return [];
+        }
+
+        if ( ! isset( $attrs[ self::TAILWIND_ATTRIBUTE ] ) || ! is_array( $attrs[ self::TAILWIND_ATTRIBUTE ] ) ) {
+            return [];
+        }
+
+        $tailwind = $attrs[ self::TAILWIND_ATTRIBUTE ];
+        if ( isset( $tailwind['cx'] ) ) {
+            $tailwind['cx'] = TWGB_Renderer::sanitize_classes( (string) $tailwind['cx'] );
+        }
+
+        return $tailwind;
+    }
+
+    /**
+     * Deduplicate classes while preserving order.
+     */
+    private static function merge_class_names( $existing, $extra ) {
+        $classes = array_filter( preg_split( '/\s+/', trim( (string) $existing . ' ' . (string) $extra ) ) );
+        if ( empty( $classes ) ) {
+            return '';
+        }
+
+        return implode( ' ', array_values( array_unique( $classes ) ) );
     }
 
     public static function register_rest_routes() {

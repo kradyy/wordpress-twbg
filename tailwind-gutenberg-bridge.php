@@ -28,6 +28,8 @@ require_once TWGB_PATH . 'patterns/class-twgb-patterns.php';
 // Boot the plugin.
 add_action( 'init', [ 'TWGB_Loader', 'init' ] );
 add_action( 'init', [ 'TWGB_Patterns', 'register' ], 20 );
+add_filter( 'register_block_type_args', [ 'TWGB_Loader', 'register_block_type_args' ], 10, 2 );
+add_filter( 'render_block', [ 'TWGB_Loader', 'render_block' ], 10, 2 );
 add_action( 'enqueue_block_editor_assets', [ 'TWGB_Loader', 'editor_assets' ] );
 add_action( 'admin_init', [ 'TWGB_Loader', 'register_settings' ] );
 add_action( 'admin_menu', [ 'TWGB_Loader', 'register_settings_page' ] );
@@ -39,8 +41,18 @@ add_action( 'rest_api_init', [ 'TWGB_Loader', 'register_rest_routes' ] );
 
 // Add body class when post uses our landing page blocks (hides theme chrome).
 add_filter( 'body_class', function ( $classes ) {
-    if ( is_singular() && has_block( 'twgb/tw-container' ) ) {
-        $classes[] = 'twgb-landing-page';
+    if ( ! is_singular() ) {
+        return $classes;
     }
+
+    $post = get_queried_object();
+    if ( $post instanceof WP_Post && is_string( $post->post_content ) ) {
+        $has_twgb_blocks = has_block( 'twgb/tw-svg', $post );
+        $has_twgb_tailwind = false !== strpos( $post->post_content, '"twgbTailwind"' );
+        if ( $has_twgb_blocks || $has_twgb_tailwind ) {
+            $classes[] = 'twgb-landing-page';
+        }
+    }
+
     return $classes;
 } );

@@ -1,8 +1,9 @@
 ( function ( wp ) {
     const { registerBlockType } = wp.blocks;
     const { InspectorControls, useBlockProps } = wp.blockEditor;
-    const { PanelBody, TextControl, TextareaControl } = wp.components;
+    const { PanelBody, TextControl, TextareaControl, FormTokenField } = wp.components;
     const { __ } = wp.i18n;
+    const { useState } = wp.element;
     const INLINE_PREVIEW_MAX_CHARS = 4000;
 
     registerBlockType( 'twgb/tw-svg', {
@@ -11,6 +12,9 @@
             const svgLength = ( svg || '' ).length;
             const isLargeSvg = svgLength > INLINE_PREVIEW_MAX_CHARS;
             const shouldRenderPreview = Boolean( svg ) && ( isSelected || ! isLargeSvg );
+            const classInputState = useState( '' );
+            const classInput = classInputState[0];
+            const setClassInput = classInputState[1];
 
             const blockProps = useBlockProps( {
                 className: 'twgb-svg-editor ' + ( twClasses || '' ),
@@ -25,10 +29,29 @@
                     wp.element.createElement(
                         PanelBody,
                         { title: __( 'SVG Settings', 'tw-gutenberg-bridge' ) },
-                        wp.element.createElement( TextControl, {
+                        wp.element.createElement( FormTokenField, {
                             label: __( 'Tailwind Classes', 'tw-gutenberg-bridge' ),
-                            value: twClasses || '',
-                            onChange: function ( val ) { setAttributes( { twClasses: val } ); },
+                            placeholder: __( 'e.g. w-full h-auto text-gray-700', 'tw-gutenberg-bridge' ),
+                            value: window.twgbUtils && typeof window.twgbUtils.classStringToTokens === 'function'
+                                ? window.twgbUtils.classStringToTokens( twClasses )
+                                : String( twClasses || '' ).trim().split( /\s+/ ).filter( Boolean ),
+                            suggestions: window.twgbUtils && typeof window.twgbUtils.getTailwindClassSuggestions === 'function'
+                                ? window.twgbUtils.getTailwindClassSuggestions( classInput )
+                                : [],
+                            onChange: function ( tokens ) {
+                                var nextClasses = window.twgbUtils && typeof window.twgbUtils.classTokensToString === 'function'
+                                    ? window.twgbUtils.classTokensToString( tokens )
+                                    : ( tokens || [] ).join( ' ' );
+                                setAttributes( { twClasses: nextClasses } );
+                            },
+                            onInputChange: function ( value ) {
+                                setClassInput( String( value || '' ) );
+                            },
+                            maxSuggestions: 200,
+                            __experimentalAutoSelectFirstMatch: true,
+                            __experimentalExpandOnFocus: true,
+                            __experimentalShowHowTo: false,
+                            tokenizeOnSpace: true,
                         } ),
                         wp.element.createElement( TextControl, {
                             label: __( 'ARIA Label (optional)', 'tw-gutenberg-bridge' ),
