@@ -1,46 +1,21 @@
 # Tailwind Gutenberg Bridge (TWGB)
 
-Tailwind Gutenberg Bridge adds Tailwind workflows to Gutenberg with a SKA-style approach:
+Tailwind Gutenberg Bridge adds a Tailwind-first workflow to Gutenberg with core-block extensions, a lightweight custom SVG block, and per-post compiled CSS output.
 
-- only one custom block is kept: `twgb/tw-svg`
-- Tailwind support is injected into core blocks via a custom attribute (`twgbTailwind.cx`)
-- Tailwind JIT runs in the editor only
-- compiled CSS is saved per post in post meta and output inline on frontend
+## Features
 
-## Current State
-
-This README reflects the current plugin behavior as of May 2026.
-
-### What is active
-
-1. Custom block:
-   - `twgb/tw-svg`
-2. Core block Tailwind extension:
-   - adds a `twgbTailwind` attribute to supported core blocks
-   - renders those classes server-side on the block root element
-3. Editor Tailwind panel for core blocks:
-   - `Tailwind (TWGB)` inspector panel
-   - device toggle buttons: `Desktop`, `Tablet`, `Mobile`
-   - `Class String` textarea
-   - categorized token fields: `Spacing`, `Sizing`, `Typography`, `Layout`, `Colors`, `Effects`, `Other`
-4. List View indicator:
-   - Tailwind icon badge appears on blocks that have Tailwind classes
-5. Editor-only runtime JIT:
-   - `@tailwindcss/browser@4` injected in wp-admin/editor
-6. Frontend CSS delivery:
-   - no frontend JIT
-   - compiled CSS saved to post meta key `_twgb_compiled_css`
-   - CSS injected through `wp_add_inline_style()`
-7. HTML import tool:
-   - `Import Tailwind HTML` from editor More menu
-   - REST parse route: `POST /wp-json/twgb/v1/parse`
-
-### What is intentionally not active
-
-- old custom layout/text/image/button/grid/flex TW blocks
-- frontend Tailwind browser JIT
-- legacy file-based post CSS output (`/uploads/twgb-page-css/...`)
-- pattern registration (currently disabled in `TWGB_Patterns::register()`)
+- Tailwind support for core Gutenberg blocks via `twgbTailwind.cx`
+- Tailwind classes applied server-side on rendered block root elements
+- Inspector UI for Tailwind editing on core blocks
+  - Device toggles: `Desktop`, `Tablet`, `Mobile`
+  - `Class String` input
+  - Categorized token fields: `Spacing`, `Sizing`, `Typography`, `Layout`, `Colors`, `Effects`, `Other`
+- List View Tailwind indicator icon on blocks with Tailwind classes
+- `TW SVG` block (`twgb/tw-svg`) for inline SVG markup with Tailwind classes
+- Editor More menu tool: **Import Tailwind HTML**
+- Editor-only Tailwind JIT using `@tailwindcss/browser@4`
+- Compiled Tailwind CSS saved per post in `_twgb_compiled_css`
+- Frontend CSS injected inline with `wp_add_inline_style()`
 
 ## Requirements
 
@@ -49,43 +24,39 @@ This README reflects the current plugin behavior as of May 2026.
 
 ## Installation
 
-1. Place this plugin in `wp-content/plugins/tw-blocks`
+1. Copy this plugin to `wp-content/plugins/tw-blocks`
 2. Activate **Tailwind Gutenberg Bridge** in WordPress admin
-3. (Optional) go to `Settings > TW Blocks` and verify editor JIT is enabled
+3. (Optional) Go to `Settings > TW Blocks` and confirm editor JIT is enabled
 
-## Quick Usage
+## Usage
 
 ### Add Tailwind to core blocks
 
-1. Insert a core block (for example `Group`, `Columns`, `Heading`, `Paragraph`, etc.)
-2. Open block settings sidebar
-3. Use `Tailwind (TWGB)` panel:
-   - paste classes in `Class String`
-   - or use category token fields with autocomplete
-4. Save/update post
+1. Insert a core block (for example `Group`, `Columns`, `Heading`, `Paragraph`)
+2. Open the block sidebar
+3. Use the **Tailwind (TWGB)** panel to add classes
+4. Save the post
 
-On save, editor-compiled Tailwind CSS is sent to `POST /wp-json/twgb/v1/save-post-css` and stored in `_twgb_compiled_css`.
+### Import Tailwind HTML
 
-### Use the TW SVG block
+1. Open editor menu (`⋮`) and click **Import Tailwind HTML**
+2. Paste HTML
+3. Import to generate Gutenberg blocks
+
+### Use TW SVG
 
 1. Insert `TW SVG`
-2. Paste full `<svg>...</svg>` markup
-3. Add Tailwind classes in token field
-4. Optional: set ARIA label
+2. Paste `<svg>...</svg>` markup
+3. Add Tailwind classes and optional ARIA label
 
-## Architecture Summary
+## REST API
 
-- Plugin bootstrap: `tailwind-gutenberg-bridge.php`
-- Loader/hooks: `includes/class-twgb-loader.php`
-- Editor extensions/UI: `assets/js/twgb-editor.js`
-- Shared class utils/suggestions: `assets/js/twgb-class-utils.js`
-- SVG block: `blocks/tw-svg/*`
-- HTML parser endpoint: `parser/class-twgb-parser.php`
-- Frontend/editor CSS: `assets/css/twgb-frontend.css`, `assets/css/twgb-editor.css`
+| Route                            | Method | Purpose                                        |
+| -------------------------------- | ------ | ---------------------------------------------- |
+| `/wp-json/twgb/v1/parse`         | `POST` | Parse Tailwind HTML into block descriptors     |
+| `/wp-json/twgb/v1/save-post-css` | `POST` | Save compiled post CSS to `_twgb_compiled_css` |
 
-### Data model
-
-- Block-level Tailwind payload on core blocks:
+## Data Model
 
 ```json
 {
@@ -95,36 +66,29 @@ On save, editor-compiled Tailwind CSS is sent to `POST /wp-json/twgb/v1/save-pos
 }
 ```
 
-- Post-level compiled CSS:
+Post-level compiled CSS is stored in:
 
 ```text
 post_meta key: _twgb_compiled_css
-value: compiled Tailwind CSS string
 ```
 
-## Notes on class conflicts and responsive variants
+## Project Structure
 
-- Responsive variants must be escaped in CSS selectors (for example `.md\\:block`).
-- This plugin preserves those escapes when saving compiled CSS to meta.
-- If multiple conflicting utilities are used in the same scope (`w-full w-1/2 w-1/3`), final applied style follows Tailwind's generated utility order, not class string order.
-
-## REST Endpoints
-
-- `POST /wp-json/twgb/v1/parse`
-  - input: `{ "html": "..." }`
-  - output: block descriptors + Gutenberg markup
-- `POST /wp-json/twgb/v1/save-post-css`
-  - input: `{ "postId": 123, "css": "..." }`
-  - stores compiled CSS in post meta
-
-## Security and sanitization
-
-- Tailwind class strings are sanitized before rendering
-- SVG markup goes through sanitizer utilities before output
-- Compiled CSS is sanitized and bounded before storage
-- Save endpoints require post edit permissions
+```text
+tw-blocks/
+├── tailwind-gutenberg-bridge.php
+├── includes/class-twgb-loader.php
+├── blocks/tw-svg/
+├── assets/js/twgb-editor.js
+├── assets/js/twgb-class-utils.js
+├── assets/css/twgb-editor.css
+├── assets/css/twgb-frontend.css
+├── parser/class-twgb-parser.php
+├── renderer/class-twgb-renderer.php
+├── tailwind-engine/class-twgb-class-intelligence.php
+└── LICENSE
+```
 
 ## License
 
-This project is proprietary.
-See [LICENSE](./LICENSE).
+Proprietary. See [LICENSE](./LICENSE).
