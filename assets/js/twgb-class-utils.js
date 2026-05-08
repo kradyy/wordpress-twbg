@@ -23,6 +23,46 @@
         'mr': 'marginRight', 'mb': 'marginBottom', 'ml': 'marginLeft',
         'm': 'margin',
     };
+    var TAILWIND_VARIANT_PREFIXES = [ '', 'sm:', 'md:', 'lg:', 'xl:', '2xl:', 'hover:', 'focus:' ];
+    var TAILWIND_SUGGESTION_BASE = [
+        'block', 'inline-block', 'inline', 'flex', 'inline-flex', 'grid', 'inline-grid', 'hidden',
+        'w-full', 'w-auto', 'w-1/2', 'w-1/3', 'w-2/3', 'w-1/4', 'w-3/4', 'w-screen',
+        'h-full', 'h-auto', 'h-screen', 'min-h-screen',
+        'max-w-sm', 'max-w-md', 'max-w-lg', 'max-w-xl', 'max-w-2xl', 'max-w-3xl', 'max-w-4xl', 'max-w-5xl', 'max-w-6xl', 'max-w-7xl', 'max-w-none',
+        'max-h-full', 'overflow-hidden', 'overflow-auto', 'overflow-x-hidden', 'overflow-y-auto',
+        'p-0', 'p-1', 'p-2', 'p-3', 'p-4', 'p-5', 'p-6', 'p-8', 'p-10', 'p-12', 'p-16',
+        'px-0', 'px-2', 'px-3', 'px-4', 'px-5', 'px-6', 'px-8', 'px-10', 'px-12',
+        'py-0', 'py-2', 'py-3', 'py-4', 'py-5', 'py-6', 'py-8', 'py-10', 'py-12',
+        'pt-0', 'pt-4', 'pt-6', 'pt-8', 'pr-0', 'pr-4', 'pr-6', 'pb-0', 'pb-4', 'pb-6', 'pl-0', 'pl-4', 'pl-6',
+        'm-0', 'm-2', 'm-4', 'm-6', 'm-8', 'mx-auto', 'mx-0', 'mx-2', 'mx-4', 'my-0', 'my-2', 'my-4', 'my-6',
+        'mt-0', 'mt-2', 'mt-4', 'mt-6', 'mb-0', 'mb-2', 'mb-4', 'mb-6', 'ml-0', 'ml-2', 'mr-0', 'mr-2',
+        'gap-0', 'gap-1', 'gap-2', 'gap-3', 'gap-4', 'gap-5', 'gap-6', 'gap-8', 'gap-10', 'gap-12',
+        'gap-x-2', 'gap-x-4', 'gap-x-6', 'gap-y-2', 'gap-y-4', 'gap-y-6',
+        'flex-row', 'flex-col', 'flex-wrap', 'flex-nowrap', 'items-start', 'items-center', 'items-end', 'items-stretch',
+        'justify-start', 'justify-center', 'justify-end', 'justify-between', 'justify-around', 'justify-evenly',
+        'grid-cols-1', 'grid-cols-2', 'grid-cols-3', 'grid-cols-4', 'grid-cols-6', 'grid-cols-12',
+        'col-span-1', 'col-span-2', 'col-span-3', 'col-span-4', 'col-span-6', 'col-span-12',
+        'rounded', 'rounded-none', 'rounded-sm', 'rounded-md', 'rounded-lg', 'rounded-xl', 'rounded-2xl', 'rounded-full',
+        'border', 'border-0', 'border-2', 'border-gray-200', 'border-gray-300', 'border-black', 'border-white',
+        'shadow', 'shadow-sm', 'shadow-md', 'shadow-lg', 'shadow-xl', 'shadow-none',
+        'text-left', 'text-center', 'text-right', 'text-justify',
+        'text-xs', 'text-sm', 'text-base', 'text-lg', 'text-xl', 'text-2xl', 'text-3xl', 'text-4xl', 'text-5xl',
+        'font-thin', 'font-light', 'font-normal', 'font-medium', 'font-semibold', 'font-bold', 'font-extrabold',
+        'leading-none', 'leading-tight', 'leading-snug', 'leading-normal', 'leading-relaxed', 'leading-loose',
+        'tracking-tight', 'tracking-normal', 'tracking-wide',
+        'text-black', 'text-white', 'text-gray-500', 'text-gray-600', 'text-gray-700', 'text-gray-900',
+        'text-blue-500', 'text-indigo-600', 'text-green-600', 'text-red-600',
+        'bg-transparent', 'bg-white', 'bg-black', 'bg-gray-50', 'bg-gray-100', 'bg-gray-900',
+        'bg-blue-500', 'bg-blue-600', 'bg-indigo-600', 'bg-green-600', 'bg-red-600', 'bg-yellow-400',
+        'object-cover', 'object-contain', 'object-center',
+        'relative', 'absolute', 'fixed', 'sticky',
+        'top-0', 'right-0', 'bottom-0', 'left-0', 'inset-0',
+        'z-0', 'z-10', 'z-20', 'z-30', 'z-40', 'z-50',
+        'opacity-0', 'opacity-25', 'opacity-50', 'opacity-75', 'opacity-100',
+        'cursor-pointer', 'cursor-not-allowed', 'select-none',
+        'transition', 'transition-all', 'duration-150', 'duration-200', 'duration-300', 'ease-in-out',
+    ];
+    var TAILWIND_SUGGESTIONS = null;
 
     function parseSingleClass( cls ) {
         var bp = 'base';
@@ -193,12 +233,75 @@
         return '[' + rounded + 'px]';
     }
 
+    function classStringToTokens( classString ) {
+        return String( classString || '' ).trim().split( /\s+/ ).filter( Boolean );
+    }
+
+    function classTokensToString( tokens ) {
+        if ( ! Array.isArray( tokens ) ) {
+            return '';
+        }
+
+        return tokens
+            .map( function ( token ) {
+                if ( typeof token === 'string' ) {
+                    return token.trim();
+                }
+                if ( token && typeof token.value === 'string' ) {
+                    return token.value.trim();
+                }
+                return '';
+            } )
+            .filter( Boolean )
+            .join( ' ' );
+    }
+
+    function getTailwindSuggestionsPool() {
+        if ( Array.isArray( TAILWIND_SUGGESTIONS ) ) {
+            return TAILWIND_SUGGESTIONS;
+        }
+
+        var pool = [];
+
+        TAILWIND_VARIANT_PREFIXES.forEach( function ( prefix ) {
+            TAILWIND_SUGGESTION_BASE.forEach( function ( cls ) {
+                pool.push( prefix + cls );
+            } );
+        } );
+
+        TAILWIND_SUGGESTIONS = Array.from( new Set( pool ) );
+        return TAILWIND_SUGGESTIONS;
+    }
+
+    function getTailwindClassSuggestions( inputValue ) {
+        var raw = String( inputValue || '' ).trim().toLowerCase();
+        var parts = raw.split( /\s+/ ).filter( Boolean );
+        var value = parts.length ? parts[ parts.length - 1 ] : '';
+        var pool = getTailwindSuggestionsPool();
+
+        if ( ! value ) {
+            return pool.slice( 0, 200 );
+        }
+
+        return pool.filter( function ( cls ) {
+            return cls.toLowerCase().indexOf( value ) !== -1;
+        } ).slice( 0, 200 );
+    }
+
+    function getAllTailwindClassSuggestions() {
+        return getTailwindSuggestionsPool().slice();
+    }
+
     // Expose globally for block scripts.
     window.twgbUtils = {
         parseClasses: parseClasses,
         attrsToClasses: attrsToClasses,
         tailwindSizeToCss: tailwindSizeToCss,
         pixelsToTailwindSize: pixelsToTailwindSize,
+        classStringToTokens: classStringToTokens,
+        classTokensToString: classTokensToString,
+        getTailwindClassSuggestions: getTailwindClassSuggestions,
+        getAllTailwindClassSuggestions: getAllTailwindClassSuggestions,
     };
 
 } )();

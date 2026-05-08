@@ -31,7 +31,6 @@ class TWGB_Parser {
         }
 
         $doc = new DOMDocument();
-        // Suppress warnings for HTML5 tags.
         libxml_use_internal_errors( true );
         $doc->loadHTML( '<div id="twgb-root">' . $html . '</div>', LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD );
         libxml_clear_errors();
@@ -56,39 +55,31 @@ class TWGB_Parser {
      * Convert a DOM node into a block descriptor.
      */
     private static function node_to_block( $node, $doc ) {
-        // Text nodes.
         if ( $node->nodeType === XML_TEXT_NODE ) {
             $text = trim( $node->textContent );
-            if ( empty( $text ) ) {
+            if ( '' === $text ) {
                 return null;
             }
+
             return [
-                'blockName'  => 'twgb/tw-text',
-                'attrs'      => [
-                    'content'       => $text,
-                    'tag'           => 'p',
-                    'twClasses'     => '',
-                    'responsiveAttrs' => [],
+                'blockName'   => 'core/paragraph',
+                'attrs'       => [
+                    'content' => $text,
                 ],
                 'innerBlocks' => [],
             ];
         }
 
-        // Element nodes only.
         if ( $node->nodeType !== XML_ELEMENT_NODE ) {
             return null;
         }
 
-        $tag     = strtolower( $node->tagName );
-        $classes = $node->getAttribute( 'class' );
-        $parsed  = TWGB_Class_Intelligence::parse_classes( $classes );
+        $tag = strtolower( $node->tagName );
+        $classes = TWGB_Renderer::sanitize_classes( $node->getAttribute( 'class' ) );
+        $parsed = TWGB_Class_Intelligence::parse_classes( $classes );
 
-        // Determine block type from element + classes.
-        $block_type = self::detect_block_type( $tag, $classes, $parsed );
-
-        // Collect inner blocks.
         $inner_blocks = [];
-        $inner_html   = '';
+        $inner_html = '';
         foreach ( $node->childNodes as $child ) {
             $inner_html .= $doc->saveHTML( $child );
             $child_block = self::node_to_block( $child, $doc );
@@ -97,88 +88,176 @@ class TWGB_Parser {
             }
         }
 
-        $attrs = [
-            'twClasses'       => $classes,
-            'responsiveAttrs' => $parsed,
-        ];
+        $block_type = self::detect_block_type( $tag, $classes, $parsed );
 
         switch ( $block_type ) {
             case 'twgb/tw-svg':
-                $attrs['svg'] = trim( $doc->saveHTML( $node ) );
-                $attrs['ariaLabel'] = $node->getAttribute( 'aria-label' ) ?: '';
-                $inner_blocks = []; // svg is a leaf block
-                break;
+                return [
+                    'blockName'   => 'twgb/tw-svg',
+                    'attrs'       => [
+                        'svg'       => trim( $doc->saveHTML( $node ) ),
+                        'ariaLabel' => $node->getAttribute( 'aria-label' ) ?: '',
+                        'twClasses' => $classes,
+                        'rawMode'   => false,
+                    ],
+                    'innerBlocks' => [],
+                ];
 
-            case 'twgb/tw-image':
-                $attrs['src'] = $node->getAttribute( 'src' );
-                $attrs['alt'] = $node->getAttribute( 'alt' );
-                $attrs['tag'] = 'img';
-                break;
+            case 'core/image':
+                return [
+                    'blockName'   => 'core/image',
+                    'attrs'       => array_merge(
+                        [
+                            'url' => $node->getAttribute( 'src' ) ?: '',
+                            'alt' => $node->getAttribute( 'alt' ) ?: '',
+                        ],
+                        self::tailwind_attrs( $classes )
+                    ),
+                    'innerBlocks' => [],
+                ];
 
-            case 'twgb/tw-button':
-                $attrs['content'] = trim( $node->textContent );
-                $attrs['href']    = $node->getAttribute( 'href' ) ?: '';
-                $attrs['tag']     = $tag;
-                break;
+            case 'twgb/core-button':
+                $button_attrs = [
+                    'text' => trim( $node->textContent ),
+                    'url'  => $tag === 'a' ? ( $node->getAttribute( 'href' ) ?: '' ) : '',
+                ];
 
-            case 'twgb/tw-text':
-                $attrs['content'] = trim( $inner_html );
-                $attrs['tag']     = $tag;
-                $inner_blocks     = []; // text blocks are leaf nodes
-                break;
+                $button_attrs = array_merge( $button_attrs, self::tailwind_attrs( $classes ) );
 
-            case 'twgb/tw-grid':
-            case 'twgb/tw-flex':
-            case 'twgb/tw-container':
-                $attrs['tag'] = $tag === 'section' ? 'section' : 'div';
-                break;
+                return [
+                    'blockName'   => 'core/buttons',
+                    'attrs'       => [],
+                    'innerBlocks' => [
+                        [
+                            'blockName'   => 'core/button',
+                            'attrs'       => $button_attrs,
+                            'innerBlocks' => [],
+                        ],
+                    ],
+                ];
+
+            case 'core/heading':
+                return [
+                    'blockName'   => 'core/heading',
+                    'attrs'       => array_merge(
+                        [
+                            'content' => trim( $inner_html !== '' ? $inner_html : $node->textContent ),
+                            'level'   => self::heading_level( $tag ),
+                        ],
+                        self::tailwind_attrs( $classes )
+                    ),
+                    'innerBlocks' => [],
+                ];
+
+            case 'core/paragraph':
+                return [
+                    'blockName'   => 'core/paragraph',
+                    'attrs'       => array_merge(
+                        [
+                            'content' => trim( $inner_html !== '' ? $inner_html : $node->textContent ),
+                        ],
+                        self::tailwind_attrs( $classes )
+                    ),
+                    'innerBlocks' => [],
+                ];
+
+            case 'core/group':
+            default:
+                $attrs = self::tailwind_attrs( $classes );
+                $tag_name = self::group_tag_name( $tag );
+                if ( '' !== $tag_name ) {
+                    $attrs['tagName'] = $tag_name;
+                }
+
+                return [
+                    'blockName'   => 'core/group',
+                    'attrs'       => $attrs,
+                    'innerBlocks' => $inner_blocks,
+                ];
         }
-
-        return [
-            'blockName'   => $block_type,
-            'attrs'       => $attrs,
-            'innerBlocks' => $inner_blocks,
-        ];
     }
 
     /**
      * Detect which block type best fits the element.
      */
     private static function detect_block_type( $tag, $classes, $parsed ) {
-        // Inline SVG.
         if ( $tag === 'svg' ) {
             return 'twgb/tw-svg';
         }
 
-        // Images.
         if ( $tag === 'img' ) {
-            return 'twgb/tw-image';
+            return 'core/image';
         }
 
-        // Buttons / links that look like buttons.
-        if ( $tag === 'button' || ( $tag === 'a' && preg_match( '/\bbtn\b|bg-.*\brounded\b/', $classes ) ) ) {
-            return 'twgb/tw-button';
+        $looks_like_button = (
+            preg_match( '/\bbtn\b/', $classes )
+            || ( preg_match( '/\bbg-[^\s]+\b/', $classes ) && preg_match( '/\brounded(?:-[^\s]+)?\b/', $classes ) )
+        );
+        if ( $tag === 'button' || ( $tag === 'a' && $looks_like_button ) ) {
+            return 'twgb/core-button';
         }
 
-        // Text elements.
-        $text_tags = [ 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'label', 'blockquote' ];
-        if ( in_array( $tag, $text_tags, true ) ) {
-            return 'twgb/tw-text';
+        if ( in_array( $tag, [ 'h1', 'h2', 'h3', 'h4', 'h5', 'h6' ], true ) ) {
+            return 'core/heading';
         }
 
-        // Grid layout.
+        if ( in_array( $tag, [ 'p', 'span', 'label', 'blockquote' ], true ) ) {
+            return 'core/paragraph';
+        }
+
         $display = $parsed['display'] ?? [];
-        if ( in_array( 'grid', $display, true ) || in_array( 'inline-grid', $display, true ) || isset( $parsed['gridCols'] ) ) {
-            return 'twgb/tw-grid';
+        if ( in_array( 'grid', $display, true ) || in_array( 'inline-grid', $display, true ) || in_array( 'flex', $display, true ) || in_array( 'inline-flex', $display, true ) ) {
+            return 'core/group';
         }
 
-        // Flex layout.
-        if ( in_array( 'flex', $display, true ) || in_array( 'inline-flex', $display, true ) || isset( $parsed['flexDirection'] ) ) {
-            return 'twgb/tw-flex';
+        return 'core/group';
+    }
+
+    /**
+     * Build SKA-style Tailwind attribute payload.
+     */
+    private static function tailwind_attrs( $classes ) {
+        $classes = trim( TWGB_Renderer::sanitize_classes( $classes ) );
+        if ( '' === $classes ) {
+            return [];
         }
 
-        // Default container.
-        return 'twgb/tw-container';
+        return [
+            'twgbTailwind' => [
+                'cx' => $classes,
+            ],
+        ];
+    }
+
+    /**
+     * Convert heading tag name to level integer.
+     */
+    private static function heading_level( $tag ) {
+        $level = (int) str_replace( 'h', '', strtolower( (string) $tag ) );
+        if ( $level < 1 || $level > 6 ) {
+            return 2;
+        }
+
+        return $level;
+    }
+
+    /**
+     * Map element tag to supported core/group tagName.
+     */
+    private static function group_tag_name( $tag ) {
+        $allowed = [
+            'div',
+            'section',
+            'article',
+            'aside',
+            'main',
+            'header',
+            'footer',
+            'nav',
+        ];
+
+        $tag = strtolower( (string) $tag );
+        return in_array( $tag, $allowed, true ) ? $tag : '';
     }
 
     /**

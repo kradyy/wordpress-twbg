@@ -5,16 +5,12 @@
 class TWGB_Loader {
 
     private static $blocks = [
-        'tw-container',
-        'tw-text',
-        'tw-image',
         'tw-svg',
-        'tw-button',
-        'tw-grid',
-        'tw-flex',
     ];
 
     private static $jit_markup_output = false;
+    private const TAILWIND_ATTRIBUTE = 'twgbTailwind';
+    private const POST_CSS_META_KEY = '_twgb_compiled_css';
 
     public static function init() {
         $class_utils_path = TWGB_PATH . 'assets/js/twgb-class-utils.js';
@@ -78,16 +74,6 @@ class TWGB_Loader {
             ]
         );
 
-        register_setting(
-            'twgb_settings',
-            'twgb_frontend_jit_enabled',
-            [
-                'type'              => 'boolean',
-                'sanitize_callback' => [ __CLASS__, 'sanitize_jit_setting' ],
-                'default'           => 0,
-            ]
-        );
-
         add_settings_section(
             'twgb_jit_settings',
             __( 'Tailwind Runtime (JIT)', 'tw-gutenberg-bridge' ),
@@ -103,13 +89,6 @@ class TWGB_Loader {
             'twgb_jit_settings'
         );
 
-        add_settings_field(
-            'twgb_frontend_jit_enabled',
-            __( 'TWGB Frontend Tailwind JIT', 'tw-gutenberg-bridge' ),
-            [ __CLASS__, 'render_frontend_jit_setting_field' ],
-            'twgb-settings',
-            'twgb_jit_settings'
-        );
     }
 
     /**
@@ -129,7 +108,7 @@ class TWGB_Loader {
      * Render section intro copy.
      */
     public static function render_settings_section_intro() {
-        echo '<p>' . esc_html__( 'Configure Tailwind Browser JIT behavior for editor and frontend.', 'tw-gutenberg-bridge' ) . '</p>';
+        echo '<p>' . esc_html__( 'Configure Tailwind Browser JIT behavior for the block editor. Frontend JIT is disabled and frontend CSS is served as inline styles from compiled per-post data stored in post meta.', 'tw-gutenberg-bridge' ) . '</p>';
     }
 
     /**
@@ -183,39 +162,10 @@ class TWGB_Loader {
     }
 
     /**
-     * Render the checkbox field for frontend JIT.
-     */
-    public static function render_frontend_jit_setting_field() {
-        $enabled = (int) get_option( 'twgb_frontend_jit_enabled', 0 );
-        ?>
-        <label for="twgb_frontend_jit_enabled">
-            <input
-                type="checkbox"
-                id="twgb_frontend_jit_enabled"
-                name="twgb_frontend_jit_enabled"
-                value="1"
-                <?php checked( 1, $enabled ); ?>
-            />
-            <?php esc_html_e( 'Enable Tailwind Browser JIT on frontend pages that use TWGB blocks.', 'tw-gutenberg-bridge' ); ?>
-        </label>
-        <p class="description">
-            <?php esc_html_e( 'Default is OFF. Enable this only for live preview/development because runtime JIT is not optimized for production.', 'tw-gutenberg-bridge' ); ?>
-        </p>
-        <?php
-    }
-
-    /**
      * Whether editor JIT is enabled.
      */
     public static function is_editor_jit_enabled() {
         return (int) get_option( 'twgb_editor_jit_enabled', 1 ) === 1;
-    }
-
-    /**
-     * Whether frontend JIT is enabled.
-     */
-    public static function is_frontend_jit_enabled() {
-        return (int) get_option( 'twgb_frontend_jit_enabled', 0 ) === 1;
     }
 
     public static function editor_assets() {
@@ -224,6 +174,8 @@ class TWGB_Loader {
         $asset      = file_exists( $asset_file )
             ? require $asset_file
             : [ 'dependencies' => [], 'version' => TWGB_VERSION ];
+        $editor_js_path  = TWGB_PATH . 'assets/js/twgb-editor.js';
+        $editor_js_ver   = file_exists( $editor_js_path ) ? filemtime( $editor_js_path ) : $asset['version'];
         $editor_css_rel  = 'assets/css/twgb-editor.css';
         $editor_css_path = TWGB_PATH . $editor_css_rel;
         $editor_css_ver  = file_exists( $editor_css_path ) ? filemtime( $editor_css_path ) : TWGB_VERSION;
@@ -232,10 +184,10 @@ class TWGB_Loader {
             'twgb-editor',
             TWGB_URL . 'assets/js/twgb-editor.js',
             array_merge(
-                [ 'wp-blocks', 'wp-element', 'wp-block-editor', 'wp-components', 'wp-i18n', 'wp-compose', 'wp-data' ],
+                [ 'wp-blocks', 'wp-element', 'wp-hooks', 'wp-block-editor', 'wp-components', 'wp-i18n', 'wp-compose', 'wp-data', 'wp-api-fetch', 'wp-plugins', 'wp-edit-post', 'twgb-class-utils' ],
                 $asset['dependencies']
             ),
-            $asset['version'],
+            $editor_js_ver,
             true
         );
 
@@ -256,21 +208,6 @@ class TWGB_Loader {
         }
 
         self::output_jit_markup_once( true );
-    }
-
-    /**
-     * Output JIT script/style on frontend, when enabled.
-     */
-    public static function output_frontend_jit() {
-        if ( is_admin() || ! self::is_frontend_jit_enabled() ) {
-            return;
-        }
-
-        if ( ! self::current_request_has_twgb_blocks() ) {
-            return;
-        }
-
-        self::output_jit_markup_once( false );
     }
 
     /**
@@ -412,55 +349,117 @@ class TWGB_Loader {
 (function () {
     var refreshTimeout = null;
     var refreshRaf = null;
+    var pointerActive = false;
+    var pendingRefresh = false;
+
     function refreshTailwind() {
         if (window.tailwind && typeof window.tailwind.refresh === 'function') {
             window.tailwind.refresh();
         }
     }
+
+    function elementLooksRelevant(node) {
+        var className;
+        if (!node || node.nodeType !== 1) {
+            return false;
+        }
+        className = node.className;
+        if (typeof className !== 'string') {
+            className = String(className || '');
+        }
+        if (className.indexOf('wp-block') !== -1 || className.indexOf('twgb-') !== -1) {
+            return true;
+        }
+        if (typeof node.querySelector === 'function') {
+            return !!node.querySelector('[class*="wp-block"], [class*="twgb-"]');
+        }
+        return false;
+    }
+
     function scheduleRefresh(delay) {
+        pendingRefresh = true;
+        if (pointerActive) {
+            return;
+        }
         if (refreshTimeout) {
             window.clearTimeout(refreshTimeout);
         }
         refreshTimeout = window.setTimeout(function () {
+            if (pointerActive) {
+                return;
+            }
             if (refreshRaf) {
                 window.cancelAnimationFrame(refreshRaf);
             }
             refreshRaf = window.requestAnimationFrame(function () {
                 refreshRaf = null;
+                pendingRefresh = false;
                 refreshTailwind();
             });
-        }, typeof delay === 'number' ? delay : 120);
+        }, typeof delay === 'number' ? delay : 180);
+    }
+    function startPointerInteraction() {
+        pointerActive = true;
+        if (refreshTimeout) {
+            window.clearTimeout(refreshTimeout);
+            refreshTimeout = null;
+        }
+    }
+    function endPointerInteraction() {
+        if (!pointerActive) {
+            return;
+        }
+        pointerActive = false;
+        if (pendingRefresh) {
+            scheduleRefresh(90);
+        }
     }
     function shouldRefresh(records) {
         var i;
+        var j;
+        var list;
         for (i = 0; i < records.length; i++) {
             if (records[i].type === 'childList') {
-                return true;
+                if (elementLooksRelevant(records[i].target)) {
+                    return true;
+                }
+                list = records[i].addedNodes || [];
+                for (j = 0; j < list.length; j++) {
+                    if (elementLooksRelevant(list[j])) {
+                        return true;
+                    }
+                }
+                list = records[i].removedNodes || [];
+                for (j = 0; j < list.length; j++) {
+                    if (elementLooksRelevant(list[j])) {
+                        return true;
+                    }
+                }
+                continue;
             }
             if (records[i].type === 'attributes' && records[i].attributeName === 'class') {
-                var target = records[i].target;
-                if (!target || target.nodeType !== 1) {
-                    continue;
-                }
-                var className = target.className;
-                if (typeof className !== 'string') {
-                    className = String(className || '');
-                }
-                if (className.indexOf('wp-block-twgb-') !== -1 || className.indexOf('twgb-') !== -1) {
+                if (elementLooksRelevant(records[i].target)) {
                     return true;
                 }
             }
         }
         return false;
     }
+    document.addEventListener('pointerdown', startPointerInteraction, true);
+    window.addEventListener('pointerup', endPointerInteraction, true);
+    window.addEventListener('pointercancel', endPointerInteraction, true);
+    window.addEventListener('blur', endPointerInteraction);
+    document.addEventListener('dragstart', startPointerInteraction, true);
+    document.addEventListener('dragend', endPointerInteraction, true);
+    document.addEventListener('drop', endPointerInteraction, true);
     window.addEventListener('load', function () { scheduleRefresh(60); });
     document.addEventListener('DOMContentLoaded', function () { scheduleRefresh(60); });
     var observer = new MutationObserver(function (records) {
         if (shouldRefresh(records)) {
-            scheduleRefresh(120);
+            scheduleRefresh(180);
         }
     });
-    observer.observe(document.documentElement, {
+    observer.observe(document.body || document.documentElement, {
         childList: true,
         subtree: true,
         attributes: true,
@@ -559,19 +558,327 @@ JS;
             [],
             null
         );
+
+        self::enqueue_current_post_compiled_css();
+    }
+
+    /**
+     * Inject saved compiled Tailwind CSS for the current singular post as inline CSS.
+     */
+    private static function enqueue_current_post_compiled_css() {
+        if ( ! is_singular() ) {
+            return;
+        }
+
+        $post = get_queried_object();
+        if ( ! $post instanceof WP_Post ) {
+            return;
+        }
+
+        $css = self::get_post_compiled_css( (int) $post->ID );
+        if ( '' === $css ) {
+            return;
+        }
+
+        wp_add_inline_style( 'twgb-frontend-style', $css );
+    }
+
+    /**
+     * Read compiled CSS from post meta.
+     *
+     * @param int $post_id Post ID.
+     * @return string
+     */
+    private static function get_post_compiled_css( $post_id ) {
+        $post_id = (int) $post_id;
+        if ( $post_id < 1 ) {
+            return '';
+        }
+
+        $css = get_post_meta( $post_id, self::POST_CSS_META_KEY, true );
+        $css = is_string( $css ) ? self::sanitize_compiled_css( $css ) : '';
+        return $css;
+    }
+
+    /**
+     * Save compiled CSS for a specific post in post meta.
+     *
+     * @param int    $post_id Post ID.
+     * @param string $css     CSS contents.
+     * @return bool
+     */
+    private static function save_post_compiled_css( $post_id, $css ) {
+        $post_id = (int) $post_id;
+        if ( $post_id < 1 ) {
+            return false;
+        }
+
+        $css = self::sanitize_compiled_css( $css );
+        if ( '' === $css ) {
+            return false;
+        }
+
+        $current = get_post_meta( $post_id, self::POST_CSS_META_KEY, true );
+        $current = is_string( $current ) ? self::sanitize_compiled_css( $current ) : '';
+        if ( $current === $css ) {
+            return true;
+        }
+
+        // Keep escaped selectors like `.md\:block` intact (WordPress strips slashes on meta save).
+        $saved = update_post_meta( $post_id, self::POST_CSS_META_KEY, wp_slash( $css ) );
+        if ( false === $saved ) {
+            $reloaded = get_post_meta( $post_id, self::POST_CSS_META_KEY, true );
+            $reloaded = is_string( $reloaded ) ? self::sanitize_compiled_css( $reloaded ) : '';
+            if ( $reloaded !== $css ) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Delete compiled CSS for a specific post from meta.
+     *
+     * @param int $post_id Post ID.
+     * @return bool
+     */
+    public static function delete_post_compiled_css( $post_id ) {
+        $post_id = (int) $post_id;
+        if ( $post_id < 1 ) {
+            return false;
+        }
+
+        delete_post_meta( $post_id, self::POST_CSS_META_KEY );
+
+        return true;
+    }
+
+    /**
+     * Remove stale compiled CSS when a post no longer contains TWGB Tailwind data.
+     *
+     * @param int     $post_id Post ID.
+     * @param WP_Post $post    Post object.
+     */
+    public static function maybe_cleanup_post_compiled_css( $post_id, $post ) {
+        $post_id = (int) $post_id;
+        if ( $post_id < 1 || wp_is_post_revision( $post_id ) || wp_is_post_autosave( $post_id ) ) {
+            return;
+        }
+
+        if ( ! $post instanceof WP_Post ) {
+            $post = get_post( $post_id );
+        }
+
+        if ( ! $post instanceof WP_Post ) {
+            return;
+        }
+
+        if ( ! self::post_has_twgb_tailwind_payload( $post ) ) {
+            self::delete_post_compiled_css( $post_id );
+        }
+    }
+
+    /**
+     * REST callback: save compiled CSS produced in the editor.
+     *
+     * @param WP_REST_Request $request Request.
+     * @return WP_REST_Response|WP_Error
+     */
+    public static function rest_save_post_css( $request ) {
+        $post_id = absint( $request->get_param( 'postId' ) );
+        if ( $post_id < 1 ) {
+            return new WP_Error( 'twgb_invalid_post_id', __( 'Invalid post ID.', 'tw-gutenberg-bridge' ), [ 'status' => 400 ] );
+        }
+
+        $post = get_post( $post_id );
+        if ( ! $post instanceof WP_Post ) {
+            return new WP_Error( 'twgb_post_not_found', __( 'Post not found.', 'tw-gutenberg-bridge' ), [ 'status' => 404 ] );
+        }
+
+        if ( ! current_user_can( 'edit_post', $post_id ) ) {
+            return new WP_Error( 'twgb_forbidden', __( 'You are not allowed to edit this post.', 'tw-gutenberg-bridge' ), [ 'status' => 403 ] );
+        }
+
+        $css = self::sanitize_compiled_css( (string) $request->get_param( 'css' ) );
+
+        if ( '' === $css ) {
+            self::delete_post_compiled_css( $post_id );
+            return rest_ensure_response(
+                [
+                    'saved'   => false,
+                    'deleted' => true,
+                ]
+            );
+        }
+
+        if ( ! self::save_post_compiled_css( $post_id, $css ) ) {
+            return new WP_Error( 'twgb_css_store_failed', __( 'Failed to store compiled CSS.', 'tw-gutenberg-bridge' ), [ 'status' => 500 ] );
+        }
+
+        $stored_css = self::get_post_compiled_css( $post_id );
+        $version = '' !== $stored_css ? md5( $stored_css ) : (string) time();
+
+        return rest_ensure_response(
+            [
+                'saved'   => true,
+                'deleted' => false,
+                'size'    => strlen( $stored_css ),
+                'version' => $version,
+            ]
+        );
+    }
+
+    /**
+     * Basic CSS sanitizer for compiled output.
+     *
+     * @param string $css Input CSS.
+     * @return string
+     */
+    private static function sanitize_compiled_css( $css ) {
+        $css = str_replace( "\0", '', (string) $css );
+        $css = trim( $css );
+
+        if ( '' === $css ) {
+            return '';
+        }
+
+        // Prevent accidental style-tag breakouts.
+        $css = str_ireplace( '</style', '', $css );
+
+        // Keep payload bounded to avoid oversized REST writes.
+        if ( strlen( $css ) > 2 * MB_IN_BYTES ) {
+            $css = substr( $css, 0, 2 * MB_IN_BYTES );
+        }
+
+        return trim( $css );
+    }
+
+    /**
+     * Check if a post still contains any TWGB Tailwind payload.
+     *
+     * @param WP_Post $post Post object.
+     * @return bool
+     */
+    private static function post_has_twgb_tailwind_payload( $post ) {
+        if ( ! $post instanceof WP_Post || ! is_string( $post->post_content ) ) {
+            return false;
+        }
+
+        if ( has_block( 'twgb/tw-svg', $post ) ) {
+            return true;
+        }
+
+        return false !== strpos( $post->post_content, '"' . self::TAILWIND_ATTRIBUTE . '"' );
     }
 
     /**
      * Check whether current frontend request contains one of the TWGB blocks.
      */
     private static function current_request_has_twgb_blocks() {
-        return has_block( 'twgb/tw-container' ) ||
-            has_block( 'twgb/tw-text' ) ||
-            has_block( 'twgb/tw-image' ) ||
-            has_block( 'twgb/tw-svg' ) ||
-            has_block( 'twgb/tw-button' ) ||
-            has_block( 'twgb/tw-grid' ) ||
-            has_block( 'twgb/tw-flex' );
+        if ( has_block( 'twgb/tw-svg' ) ) {
+            return true;
+        }
+
+        if ( ! is_singular() ) {
+            return false;
+        }
+
+        $post = get_queried_object();
+        if ( ! $post instanceof WP_Post ) {
+            return false;
+        }
+
+        if ( ! is_string( $post->post_content ) || '' === $post->post_content ) {
+            return false;
+        }
+
+        return false !== strpos( $post->post_content, '"' . self::TAILWIND_ATTRIBUTE . '"' );
+    }
+
+    /**
+     * Add TWGB Tailwind attribute to blocks that support custom class names.
+     */
+    public static function register_block_type_args( $args, $name ) {
+        if ( ! is_string( $name ) || '' === $name ) {
+            return $args;
+        }
+
+        if ( ! isset( $args['attributes'] ) || ! is_array( $args['attributes'] ) ) {
+            $args['attributes'] = [];
+        }
+
+        if ( ! isset( $args['attributes'][ self::TAILWIND_ATTRIBUTE ] ) ) {
+            $args['attributes'][ self::TAILWIND_ATTRIBUTE ] = [
+                'type' => 'object',
+            ];
+        }
+
+        return $args;
+    }
+
+    /**
+     * Apply TWGB Tailwind classes to rendered blocks server-side.
+     */
+    public static function render_block( $block_content, $block ) {
+        if ( ! is_array( $block ) || ! isset( $block['attrs'] ) || ! is_array( $block['attrs'] ) ) {
+            return $block_content;
+        }
+
+        $tailwind = self::get_tailwind_attribute( $block['attrs'] );
+        $class_names = trim( (string) ( $tailwind['cx'] ?? '' ) );
+        if ( '' === $class_names || '' === trim( (string) $block_content ) ) {
+            return $block_content;
+        }
+
+        if ( ! class_exists( 'WP_HTML_Tag_Processor' ) ) {
+            return $block_content;
+        }
+
+        $processor = new WP_HTML_Tag_Processor( $block_content );
+        if ( ! $processor->next_tag() ) {
+            return $block_content;
+        }
+
+        $merged = self::merge_class_names( (string) $processor->get_attribute( 'class' ), $class_names );
+        if ( '' === $merged ) {
+            return $block_content;
+        }
+
+        $processor->set_attribute( 'class', $merged );
+        return $processor->get_updated_html();
+    }
+
+    /**
+     * Read and sanitize the Tailwind attribute payload.
+     */
+    private static function get_tailwind_attribute( $attrs ) {
+        if ( ! is_array( $attrs ) ) {
+            return [];
+        }
+
+        if ( ! isset( $attrs[ self::TAILWIND_ATTRIBUTE ] ) || ! is_array( $attrs[ self::TAILWIND_ATTRIBUTE ] ) ) {
+            return [];
+        }
+
+        $tailwind = $attrs[ self::TAILWIND_ATTRIBUTE ];
+        if ( isset( $tailwind['cx'] ) ) {
+            $tailwind['cx'] = TWGB_Renderer::sanitize_classes( (string) $tailwind['cx'] );
+        }
+
+        return $tailwind;
+    }
+
+    /**
+     * Deduplicate classes while preserving order.
+     */
+    private static function merge_class_names( $existing, $extra ) {
+        $classes = array_filter( preg_split( '/\s+/', trim( (string) $existing . ' ' . (string) $extra ) ) );
+        if ( empty( $classes ) ) {
+            return '';
+        }
+
+        return implode( ' ', array_values( array_unique( $classes ) ) );
     }
 
     public static function register_rest_routes() {
@@ -580,6 +887,15 @@ JS;
             'callback'            => [ 'TWGB_Parser', 'rest_parse' ],
             'permission_callback' => function () {
                 return current_user_can( 'edit_posts' );
+            },
+        ] );
+
+        register_rest_route( 'twgb/v1', '/save-post-css', [
+            'methods'             => 'POST',
+            'callback'            => [ __CLASS__, 'rest_save_post_css' ],
+            'permission_callback' => function ( $request ) {
+                $post_id = absint( $request->get_param( 'postId' ) );
+                return $post_id > 0 && current_user_can( 'edit_post', $post_id );
             },
         ] );
     }
