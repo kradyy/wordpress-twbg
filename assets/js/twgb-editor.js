@@ -976,29 +976,6 @@
     };
   }, "twgbWithTailwindEditorClasses");
 
-  function withTailwindSaveClasses(extraProps, blockType, attributes) {
-    if (!hasTailwindSupport(blockType, blockType && blockType.name)) {
-      return extraProps;
-    }
-
-    var current =
-      attributes && attributes[TAILWIND_ATTRIBUTE]
-        ? attributes[TAILWIND_ATTRIBUTE]
-        : {};
-    var cx = filterTailwindClassesForGutenbergAttrs(
-      current.cx || "",
-      attributes || {},
-      blockType && blockType.name,
-    );
-    if (!cx) {
-      return extraProps;
-    }
-
-    var next = Object.assign({}, extraProps || {});
-    next.className = mergeClassNames(next.className, cx);
-    return next;
-  }
-
   addFilter(
     "blocks.registerBlockType",
     "twgb/with-tailwind-attribute",
@@ -1014,11 +991,6 @@
     "twgb/with-tailwind-editor-classes",
     withTailwindEditorClasses,
     500,
-  );
-  addFilter(
-    "blocks.getSaveContent.extraProps",
-    "twgb/with-tailwind-save-classes",
-    withTailwindSaveClasses,
   );
 
   function hasTailwindClassesOnAttributes(attributes) {
