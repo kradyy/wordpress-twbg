@@ -949,6 +949,50 @@
     };
   }, "twgbWithTailwindInspector");
 
+  // Finds the inner <a> for a core/button block in the editor canvas,
+  // checking both the parent document and the iframed canvas (WP 6.4+).
+  function findButtonLink(clientId) {
+    var selector =
+      '[data-block="' + clientId + '"] .wp-block-button__link';
+    var el = document.querySelector(selector);
+    if (el) return el;
+    var iframes = document.querySelectorAll("iframe");
+    for (var i = 0; i < iframes.length; i++) {
+      try {
+        var found = iframes[i].contentDocument &&
+          iframes[i].contentDocument.querySelector(selector);
+        if (found) return found;
+      } catch (e) {}
+    }
+    return null;
+  }
+
+  // Null-rendering component that imperatively adds/removes Tailwind classes
+  // on the inner <a> after the block renders, so the editor JIT scans them.
+  function ButtonTailwindApplier(applierProps) {
+    wp.element.useEffect(
+      function () {
+        var classes = applierProps.cx.split(/\s+/).filter(Boolean);
+        var el = findButtonLink(applierProps.clientId);
+        if (el) {
+          classes.forEach(function (cls) {
+            el.classList.add(cls);
+          });
+        }
+        return function () {
+          var el2 = findButtonLink(applierProps.clientId);
+          if (el2) {
+            classes.forEach(function (cls) {
+              el2.classList.remove(cls);
+            });
+          }
+        };
+      },
+      [applierProps.clientId, applierProps.cx],
+    );
+    return null;
+  }
+
   const withTailwindEditorClasses = createHigherOrderComponent(function (
     BlockListBlock,
   ) {
@@ -965,6 +1009,21 @@
 
       if (!cx || !hasTailwindSupport(null, props.name)) {
         return wp.element.createElement(BlockListBlock, props);
+      }
+
+      // core/button: BlockListBlock wraps div.wp-block-button, not the inner <a>.
+      // Use an effect to add classes directly to the inner <a> after render.
+      if (props.name === "core/button" && props.clientId) {
+        return wp.element.createElement(
+          wp.element.Fragment,
+          null,
+          wp.element.createElement(BlockListBlock, props),
+          wp.element.createElement(ButtonTailwindApplier, {
+            key: "twgb-btn-" + props.clientId,
+            clientId: props.clientId,
+            cx: cx,
+          }),
+        );
       }
 
       return wp.element.createElement(
