@@ -322,12 +322,7 @@ class TWGB_Loader {
 
         // Browser runtime should scan current DOM, not file directives.
         $css = preg_replace(
-            '/@import\s+["\']tailwindcss["\']\s+source\(none\)\s*;?/i',
-            '@import "tailwindcss" important;',
-            $css
-        ) ?? $css;
-        $css = preg_replace(
-            '/@import\s+["\']tailwindcss["\']\s*;?/i',
+            '/@import\s+["\']tailwindcss["\'](?:\s+source\(none\))?(?:\s+important)?\s*;?/i',
             '@import "tailwindcss" important;',
             $css
         ) ?? $css;
@@ -825,28 +820,515 @@ JS;
             return $block_content;
         }
 
-        $tailwind = self::get_tailwind_attribute( $block['attrs'] );
-        $class_names = trim( (string) ( $tailwind['cx'] ?? '' ) );
-        if ( '' === $class_names || '' === trim( (string) $block_content ) ) {
+        $block_name = isset( $block['blockName'] ) ? (string) $block['blockName'] : '';
+        if ( '' === trim( (string) $block_content ) ) {
             return $block_content;
         }
+
+        // Always normalize core/button wrapper classes, even when twgbTailwind
+        // is missing, so wrapper-only className output is still corrected.
+        if ( 'core/button' === $block_name ) {
+            $block_content = self::normalize_core_button_wrapper_classes( $block_content );
+        }
+
+        $tailwind = self::get_tailwind_attribute( $block['attrs'] );
+        $class_names = trim( (string) ( $tailwind['cx'] ?? '' ) );
+        if ( '' === $class_names ) {
+            return $block_content;
+        }
+
+        $blocked_class_names = self::get_blocked_tailwind_classes( $class_names, $block['attrs'], $block_name );
+        $class_names = self::filter_tailwind_classes_for_gutenberg_attrs( $class_names, $block['attrs'], $block_name );
 
         if ( ! class_exists( 'WP_HTML_Tag_Processor' ) ) {
             return $block_content;
         }
 
-        $processor = new WP_HTML_Tag_Processor( $block_content );
-        if ( ! $processor->next_tag() ) {
-            return $block_content;
+        // core/button: apply Tailwind classes on the interactive element (<a>/<button>),
+        // not on the outer wrapper. This avoids wrapper background artifacts.
+        if ( 'core/button' === $block_name ) {
+            return self::apply_tailwind_classes_to_matching_tags(
+                $block_content,
+                $class_names,
+                $blocked_class_names,
+                static function ( $tag, $processor ) {
+                    if ( 'A' !== $tag && 'BUTTON' !== $tag ) {
+                        return false;
+                    }
+
+                    if ( 'A' === $tag ) {
+                        $class_attr = (string) $processor->get_attribute( 'class' );
+                        if ( false !== strpos( $class_attr, 'wp-block-button__link' ) ) {
+                            return true;
+                        }
+                    }
+
+                    return true;
+                },
+                1
+            );
         }
 
-        $merged = self::merge_class_names( (string) $processor->get_attribute( 'class' ), $class_names );
-        if ( '' === $merged ) {
-            return $block_content;
+        // core/image: keep classes on wrapper and also apply to first <img>.
+        if ( 'core/image' === $block_name ) {
+            $updated = self::apply_tailwind_classes_to_matching_tags(
+                $block_content,
+                $class_names,
+                $blocked_class_names,
+                static function () {
+                    return true;
+                },
+                1
+            );
+
+            return self::apply_tailwind_classes_to_matching_tags(
+                $updated,
+                $class_names,
+                $blocked_class_names,
+                static function ( $tag ) {
+                    return 'IMG' === $tag;
+                },
+                1
+            );
         }
 
-        $processor->set_attribute( 'class', $merged );
+        // Default behavior: apply classes to the first rendered tag.
+        return self::apply_tailwind_classes_to_matching_tags(
+            $block_content,
+            $class_names,
+            $blocked_class_names,
+            static function () {
+                return true;
+            },
+            1
+        );
+    }
+
+    /**
+     * Apply classes to tags that match the given selector callback.
+     *
+     * @param string   $html             Rendered block HTML.
+     * @param string   $class_names      TWGB classes to merge.
+     * @param string[] $blocked_classes  Classes to remove before merge.
+     * @param callable $selector         Receives ($tag, $processor), returns bool.
+     * @param int      $max_matches      Max tags to mutate (0 = unlimited).
+     * @return string
+     */
+    private static function apply_tailwind_classes_to_matching_tags( $html, $class_names, $blocked_classes, $selector, $max_matches = 1 ) {
+        $processor = new WP_HTML_Tag_Processor( $html );
+        $matched   = 0;
+
+        while ( $processor->next_tag() ) {
+            $tag = $processor->get_tag();
+            if ( ! call_user_func( $selector, $tag, $processor ) ) {
+                continue;
+            }
+
+            $existing = self::remove_class_names(
+                (string) $processor->get_attribute( 'class' ),
+                $blocked_classes
+            );
+            $merged = self::merge_class_names( $existing, $class_names );
+            $processor->set_attribute( 'class', $merged );
+
+            $matched++;
+            if ( $max_matches > 0 && $matched >= $max_matches ) {
+                break;
+            }
+        }
+
+        if ( 0 === $matched ) {
+            return $html;
+        }
+
         return $processor->get_updated_html();
+    }
+
+    /**
+     * Move accidental visual utility classes from core/button wrapper to inner link/button.
+     *
+     * Some generated content incorrectly stores Tailwind utilities on
+     * <div class="wp-block-button ..."> instead of <a.wp-block-button__link>,
+     * which creates outer wrapper backgrounds. Keep structural wrapper classes
+     * and transfer non-structural utilities to the interactive element.
+     */
+    private static function normalize_core_button_wrapper_classes( $html ) {
+        if ( ! class_exists( 'WP_HTML_Tag_Processor' ) ) {
+            return $html;
+        }
+
+        $processor = new WP_HTML_Tag_Processor( $html );
+        $wrapper_found = false;
+        $transfer_tokens = [];
+
+        while ( $processor->next_tag() ) {
+            if ( 'DIV' !== $processor->get_tag() ) {
+                continue;
+            }
+
+            $class_attr = (string) $processor->get_attribute( 'class' );
+            if ( false === strpos( $class_attr, 'wp-block-button' ) ) {
+                continue;
+            }
+
+            $wrapper_found = true;
+            $tokens = preg_split( '/\s+/', trim( $class_attr ) );
+            $kept_tokens = [];
+
+            foreach ( $tokens as $token ) {
+                $token = trim( (string) $token );
+                if ( '' === $token ) {
+                    continue;
+                }
+
+                if ( self::is_core_button_wrapper_structural_class( $token ) ) {
+                    $kept_tokens[] = $token;
+                    continue;
+                }
+
+                $transfer_tokens[] = $token;
+            }
+
+            $processor->set_attribute( 'class', implode( ' ', array_values( array_unique( $kept_tokens ) ) ) );
+            break;
+        }
+
+        if ( ! $wrapper_found ) {
+            return $html;
+        }
+
+        $normalized_html = $processor->get_updated_html();
+        $transfer_classes = implode( ' ', array_values( array_unique( $transfer_tokens ) ) );
+        if ( '' === trim( $transfer_classes ) ) {
+            return $normalized_html;
+        }
+
+        return self::apply_tailwind_classes_to_matching_tags(
+            $normalized_html,
+            $transfer_classes,
+            [],
+            static function ( $tag, $inner_processor ) {
+                if ( 'A' !== $tag && 'BUTTON' !== $tag ) {
+                    return false;
+                }
+
+                if ( 'A' === $tag ) {
+                    $class_attr = (string) $inner_processor->get_attribute( 'class' );
+                    if ( false !== strpos( $class_attr, 'wp-block-button__link' ) ) {
+                        return true;
+                    }
+                }
+
+                return true;
+            },
+            1
+        );
+    }
+
+    /**
+     * Wrapper classes that should remain on core/button outer container.
+     */
+    private static function is_core_button_wrapper_structural_class( $class_name ) {
+        $class_name = trim( (string) $class_name );
+        if ( '' === $class_name ) {
+            return true;
+        }
+
+        if ( 0 === strpos( $class_name, 'wp-block-button' ) ) {
+            return true;
+        }
+
+        if ( 0 === strpos( $class_name, 'is-layout-' ) ) {
+            return true;
+        }
+
+        if ( 0 === strpos( $class_name, 'align' ) ) {
+            return true;
+        }
+
+        if ( 0 === strpos( $class_name, 'has-custom-' ) ) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Keep Gutenberg user-set controls ahead of normal Tailwind utilities.
+     */
+    private static function filter_tailwind_classes_for_gutenberg_attrs( $class_names, $attrs, $block_name = '' ) {
+        $blocked = self::get_blocked_tailwind_classes( $class_names, $attrs, $block_name );
+        if ( empty( $blocked ) ) {
+            return TWGB_Renderer::sanitize_classes( (string) $class_names );
+        }
+
+        $blocked_lookup = array_flip( $blocked );
+        $tokens = preg_split( '/\s+/', trim( TWGB_Renderer::sanitize_classes( (string) $class_names ) ) );
+        $allowed = [];
+
+        foreach ( $tokens as $token ) {
+            if ( '' === $token || isset( $blocked_lookup[ $token ] ) ) {
+                continue;
+            }
+            $allowed[] = $token;
+        }
+
+        return implode( ' ', array_values( array_unique( $allowed ) ) );
+    }
+
+    /**
+     * Return non-important TWGB tokens that conflict with user-set Gutenberg controls.
+     */
+    private static function get_blocked_tailwind_classes( $class_names, $attrs, $block_name = '' ) {
+        $groups = self::get_gutenberg_user_conflict_groups( $attrs, $block_name );
+        if ( empty( $groups ) ) {
+            return [];
+        }
+
+        $tokens = preg_split( '/\s+/', trim( TWGB_Renderer::sanitize_classes( (string) $class_names ) ) );
+        $blocked = [];
+
+        foreach ( $tokens as $token ) {
+            if ( '' === $token || self::is_important_tailwind_token( $token ) ) {
+                continue;
+            }
+
+            $group = self::classify_tailwind_conflict_group( $token );
+            if ( '' !== $group && ! empty( $groups[ $group ] ) ) {
+                $blocked[] = $token;
+            }
+        }
+
+        return array_values( array_unique( $blocked ) );
+    }
+
+    /**
+     * Identify Gutenberg controls that were saved as actual block attributes.
+     */
+    private static function get_gutenberg_user_conflict_groups( $attrs, $block_name = '' ) {
+        $attrs = is_array( $attrs ) ? $attrs : [];
+        $groups = [];
+
+        if (
+            self::is_non_empty_user_value( $attrs['textColor'] ?? null ) ||
+            self::is_non_empty_user_value( self::array_path( $attrs, [ 'style', 'color', 'text' ] ) )
+        ) {
+            $groups['textColor'] = true;
+        }
+
+        if (
+            self::is_non_empty_user_value( $attrs['backgroundColor'] ?? null ) ||
+            self::is_non_empty_user_value( $attrs['gradient'] ?? null ) ||
+            self::is_non_empty_user_value( self::array_path( $attrs, [ 'style', 'color', 'background' ] ) ) ||
+            self::is_non_empty_user_value( self::array_path( $attrs, [ 'style', 'color', 'gradient' ] ) )
+        ) {
+            $groups['backgroundColor'] = true;
+        }
+
+        if (
+            self::is_non_empty_user_value( $attrs['fontSize'] ?? null ) ||
+            self::is_non_empty_user_value( self::array_path( $attrs, [ 'style', 'typography', 'fontSize' ] ) )
+        ) {
+            $groups['fontSize'] = true;
+        }
+
+        $align = isset( $attrs['align'] ) ? (string) $attrs['align'] : '';
+        if (
+            self::is_non_empty_user_value( $attrs['textAlign'] ?? null ) ||
+            ( self::block_uses_align_as_text_align( $block_name ) && preg_match( '/^(left|center|right|justify|start|end)$/', $align ) )
+        ) {
+            $groups['textAlign'] = true;
+        }
+
+        if ( self::is_non_empty_user_value( self::array_path( $attrs, [ 'style', 'spacing', 'padding' ] ) ) ) {
+            $groups['padding'] = true;
+        }
+
+        if ( self::is_non_empty_user_value( self::array_path( $attrs, [ 'style', 'spacing', 'margin' ] ) ) ) {
+            $groups['margin'] = true;
+        }
+
+        if ( self::is_non_empty_user_value( self::array_path( $attrs, [ 'style', 'spacing', 'blockGap' ] ) ) ) {
+            $groups['gap'] = true;
+        }
+
+        if ( self::is_non_empty_user_value( self::array_path( $attrs, [ 'style', 'border', 'radius' ] ) ) ) {
+            $groups['borderRadius'] = true;
+        }
+
+        return $groups;
+    }
+
+    private static function array_path( $source, $path ) {
+        $current = $source;
+        foreach ( $path as $key ) {
+            if ( ! is_array( $current ) || ! array_key_exists( $key, $current ) ) {
+                return null;
+            }
+            $current = $current[ $key ];
+        }
+        return $current;
+    }
+
+    private static function is_non_empty_user_value( $value ) {
+        if ( null === $value ) {
+            return false;
+        }
+        if ( is_string( $value ) ) {
+            return '' !== trim( $value );
+        }
+        if ( is_bool( $value ) || is_int( $value ) || is_float( $value ) ) {
+            return true;
+        }
+        if ( is_array( $value ) ) {
+            foreach ( $value as $item ) {
+                if ( self::is_non_empty_user_value( $item ) ) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        return false;
+    }
+
+    private static function block_uses_align_as_text_align( $block_name ) {
+        return in_array(
+            (string) $block_name,
+            [
+                'core/paragraph',
+                'core/heading',
+                'core/list',
+                'core/list-item',
+                'core/quote',
+                'core/pullquote',
+                'core/verse',
+                'core/preformatted',
+            ],
+            true
+        );
+    }
+
+    private static function get_tailwind_utility_part( $token ) {
+        $token = trim( (string) $token );
+        if ( '' === $token ) {
+            return '';
+        }
+
+        $depth = 0;
+        $last_separator = -1;
+        $length = strlen( $token );
+
+        for ( $i = 0; $i < $length; $i++ ) {
+            $char = $token[ $i ];
+            if ( '[' === $char ) {
+                $depth++;
+            } elseif ( ']' === $char && $depth > 0 ) {
+                $depth--;
+            } elseif ( ':' === $char && 0 === $depth ) {
+                $last_separator = $i;
+            }
+        }
+
+        return $last_separator >= 0 ? substr( $token, $last_separator + 1 ) : $token;
+    }
+
+    private static function is_important_tailwind_token( $token ) {
+        $token = trim( (string) $token );
+        $utility = self::get_tailwind_utility_part( $token );
+        return (
+            '' !== $token && '!' === $token[0]
+        ) || (
+            '' !== $utility && ( '!' === $utility[0] || '!' === substr( $utility, -1 ) )
+        );
+    }
+
+    private static function normalize_tailwind_utility_part( $token ) {
+        $utility = self::get_tailwind_utility_part( $token );
+        if ( '' !== $utility && '!' === $utility[0] ) {
+            $utility = substr( $utility, 1 );
+        }
+        if ( '' !== $utility && '!' === substr( $utility, -1 ) ) {
+            $utility = substr( $utility, 0, -1 );
+        }
+        return $utility;
+    }
+
+    private static function classify_tailwind_conflict_group( $token ) {
+        $utility = self::normalize_tailwind_utility_part( $token );
+
+        if ( preg_match( '/^-?(?:p|px|py|pt|pr|pb|pl|ps|pe)-/', $utility ) ) {
+            return 'padding';
+        }
+        if ( preg_match( '/^-?(?:m|mx|my|mt|mr|mb|ml|ms|me)-/', $utility ) ) {
+            return 'margin';
+        }
+        if ( preg_match( '/^gap(?:-[xy])?-/', $utility ) ) {
+            return 'gap';
+        }
+        if ( preg_match( '/^rounded(?:-|$)/', $utility ) ) {
+            return 'borderRadius';
+        }
+        if ( preg_match( '/^text-(left|center|right|justify|start|end)$/', $utility ) ) {
+            return 'textAlign';
+        }
+        if ( preg_match( '/^text-(.+)$/', $utility, $m ) ) {
+            $font_sizes = [ 'xs', 'sm', 'base', 'lg', 'xl', '2xl', '3xl', '4xl', '5xl', '6xl', '7xl', '8xl', '9xl' ];
+            if ( in_array( $m[1], $font_sizes, true ) || self::is_tailwind_length_value( $m[1] ) ) {
+                return 'fontSize';
+            }
+            return 'textColor';
+        }
+        if ( self::is_background_color_utility( $utility ) ) {
+            return 'backgroundColor';
+        }
+
+        return '';
+    }
+
+    private static function is_tailwind_length_value( $value ) {
+        $value = (string) $value;
+        if ( preg_match( '/^\[(.+)\]$/', $value, $m ) ) {
+            $value = $m[1];
+        }
+        return (bool) (
+            preg_match( '/^-?\d*\.?\d+(px|rem|em|%|vw|vh|svw|svh|lvw|lvh|dvw|dvh|ch|ex|lh|rlh)$/', $value ) ||
+            preg_match( '/^(calc|clamp|min|max)\(/', $value )
+        );
+    }
+
+    private static function is_background_color_utility( $utility ) {
+        if ( 0 !== strpos( $utility, 'bg-' ) ) {
+            return false;
+        }
+
+        $value = substr( $utility, 3 );
+        if ( preg_match( '/^\[(url|image|position|size|length):/i', $value ) || preg_match( '/^\[url\(/i', $value ) ) {
+            return false;
+        }
+
+        return ! (bool) preg_match(
+            '/^(auto|cover|contain|fixed|local|scroll|center|top|bottom|left|right|no-repeat|repeat|repeat-x|repeat-y|repeat-round|repeat-space|clip-|origin-|blend-)/',
+            $value
+        );
+    }
+
+    private static function remove_class_names( $existing, $remove ) {
+        if ( empty( $remove ) ) {
+            return trim( (string) $existing );
+        }
+
+        $remove_lookup = array_flip( $remove );
+        $tokens = preg_split( '/\s+/', trim( (string) $existing ) );
+        $kept = [];
+
+        foreach ( $tokens as $token ) {
+            if ( '' === $token || isset( $remove_lookup[ $token ] ) ) {
+                continue;
+            }
+            $kept[] = $token;
+        }
+
+        return implode( ' ', $kept );
     }
 
     /**

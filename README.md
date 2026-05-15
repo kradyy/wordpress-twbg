@@ -49,6 +49,14 @@ Tailwind Gutenberg Bridge adds a Tailwind-first workflow to Gutenberg with core-
 2. Paste `<svg>...</svg>` markup
 3. Add Tailwind classes and optional ARIA label
 
+## Gutenberg vs TW
+
+- Tailwind wins over Gutenberg defaults.
+- Gutenberg wins when a client/user changes a block control.
+- Tailwind wins again when a developer marks a class important with `!`.
+- Important classes can be written as `!text-red-500`, `hover:!text-red-500`, `text-red-500!`, or `hover:text-red-500!`.
+- Important TW labels are shown with a light red background in the editor.
+
 ## REST API
 
 | Route                            | Method | Purpose                                        |

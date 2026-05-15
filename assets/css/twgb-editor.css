@@ -37,6 +37,29 @@
     min-height: 34px;
 }
 
+.twgb-tailwind-group__field .components-form-token-field__token.twgb-token--important,
+.twgb-svg-tailwind-field .components-form-token-field__token.twgb-token--important {
+    background: #fecaca !important;
+    border-color: #ef4444 !important;
+    color: #7f1d1d !important;
+}
+
+.twgb-tailwind-group__field .components-form-token-field__token.twgb-token--important .components-form-token-field__token-text,
+.twgb-tailwind-group__field .components-form-token-field__token.twgb-token--important .components-button,
+.twgb-svg-tailwind-field .components-form-token-field__token.twgb-token--important .components-form-token-field__token-text,
+.twgb-svg-tailwind-field .components-form-token-field__token.twgb-token--important .components-button {
+    background: #fecaca !important;
+    color: #7f1d1d !important;
+}
+
+.twgb-tailwind-group__field .components-form-token-field__token.twgb-token--important .components-button:hover,
+.twgb-tailwind-group__field .components-form-token-field__token.twgb-token--important .components-button:focus,
+.twgb-svg-tailwind-field .components-form-token-field__token.twgb-token--important .components-button:hover,
+.twgb-svg-tailwind-field .components-form-token-field__token.twgb-token--important .components-button:focus {
+    background: #fca5a5 !important;
+    color: #7f1d1d !important;
+}
+
 .block-editor-list-view-block-select-button__content {
     display: flex;
     align-items: center;

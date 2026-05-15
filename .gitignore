@@ -2,3 +2,4 @@ tests
 scripts
 patterns
 *.sh
+.omc

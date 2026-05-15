@@ -160,12 +160,12 @@
 
   function sanitizeClassNames(classes) {
     return String(classes || "")
-      .replace(/[^a-zA-Z0-9\s\-_:/.\[\]#%,]/g, "")
+      .replace(/[^a-zA-Z0-9\s\-_:/.\[\]#%,!]/g, "")
       .trim();
   }
 
   function sanitizeClassNamesDraft(classes) {
-    return String(classes || "").replace(/[^a-zA-Z0-9\s\-_:/.\[\]#%,]/g, "");
+    return String(classes || "").replace(/[^a-zA-Z0-9\s\-_:/.\[\]#%,!]/g, "");
   }
 
   function classStringToTokenArray(classString) {
@@ -223,15 +223,47 @@
 
   function getTailwindUtilityPart(token) {
     var value = String(token || "").trim();
+    var depth = 0;
+    var lastSeparator = -1;
+    var i;
     if (!value) {
       return "";
     }
-    var parts = value.split(":");
-    return parts[parts.length - 1];
+    for (i = 0; i < value.length; i++) {
+      if (value[i] === "[") {
+        depth++;
+      } else if (value[i] === "]" && depth > 0) {
+        depth--;
+      } else if (value[i] === ":" && depth === 0) {
+        lastSeparator = i;
+      }
+    }
+    return lastSeparator === -1 ? value : value.slice(lastSeparator + 1);
+  }
+
+  function isImportantTailwindToken(token) {
+    var value = String(token || "").trim();
+    var utility = getTailwindUtilityPart(value);
+    return (
+      value.charAt(0) === "!" ||
+      utility.charAt(0) === "!" ||
+      utility.charAt(utility.length - 1) === "!"
+    );
+  }
+
+  function normalizeTailwindUtilityPart(token) {
+    var utility = getTailwindUtilityPart(token);
+    if (utility.charAt(0) === "!") {
+      utility = utility.slice(1);
+    }
+    if (utility.charAt(utility.length - 1) === "!") {
+      utility = utility.slice(0, -1);
+    }
+    return utility;
   }
 
   function detectTailwindCategory(token) {
-    var utility = getTailwindUtilityPart(token);
+    var utility = normalizeTailwindUtilityPart(token);
 
     if (
       /^(?:-?m[trblxy]?|p[trblxy]?|gap(?:-[xy])?|space-[xy]|divide-[xy])-/.test(
@@ -324,6 +356,209 @@
         return token.toLowerCase().indexOf(needle) !== -1;
       })
       .slice(0, 160);
+  }
+
+  function isNonEmptyUserValue(value) {
+    if (value === null || typeof value === "undefined") {
+      return false;
+    }
+    if (typeof value === "string") {
+      return value.trim() !== "";
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+      return true;
+    }
+    if (Array.isArray(value)) {
+      return value.some(isNonEmptyUserValue);
+    }
+    if (typeof value === "object") {
+      return Object.keys(value).some(function (key) {
+        return isNonEmptyUserValue(value[key]);
+      });
+    }
+    return false;
+  }
+
+  function getPathValue(source, path) {
+    var current = source;
+    var i;
+    for (i = 0; i < path.length; i++) {
+      if (!current || typeof current !== "object") {
+        return undefined;
+      }
+      current = current[path[i]];
+    }
+    return current;
+  }
+
+  function blockUsesAlignAsTextAlign(blockName) {
+    return (
+      [
+        "core/paragraph",
+        "core/heading",
+        "core/list",
+        "core/list-item",
+        "core/quote",
+        "core/pullquote",
+        "core/verse",
+        "core/preformatted",
+      ].indexOf(blockName) !== -1
+    );
+  }
+
+  function getGutenbergUserConflictGroups(attrs, blockName) {
+    var groups = {};
+    var align = attrs && typeof attrs.align === "string" ? attrs.align : "";
+
+    if (
+      isNonEmptyUserValue(attrs && attrs.textColor) ||
+      isNonEmptyUserValue(getPathValue(attrs, ["style", "color", "text"]))
+    ) {
+      groups.textColor = true;
+    }
+
+    if (
+      isNonEmptyUserValue(attrs && attrs.backgroundColor) ||
+      isNonEmptyUserValue(attrs && attrs.gradient) ||
+      isNonEmptyUserValue(getPathValue(attrs, ["style", "color", "background"])) ||
+      isNonEmptyUserValue(getPathValue(attrs, ["style", "color", "gradient"]))
+    ) {
+      groups.backgroundColor = true;
+    }
+
+    if (
+      isNonEmptyUserValue(attrs && attrs.fontSize) ||
+      isNonEmptyUserValue(getPathValue(attrs, ["style", "typography", "fontSize"]))
+    ) {
+      groups.fontSize = true;
+    }
+
+    if (
+      isNonEmptyUserValue(attrs && attrs.textAlign) ||
+      (blockUsesAlignAsTextAlign(blockName) &&
+        /^(left|center|right|justify|start|end)$/.test(align))
+    ) {
+      groups.textAlign = true;
+    }
+
+    if (isNonEmptyUserValue(getPathValue(attrs, ["style", "spacing", "padding"]))) {
+      groups.padding = true;
+    }
+
+    if (isNonEmptyUserValue(getPathValue(attrs, ["style", "spacing", "margin"]))) {
+      groups.margin = true;
+    }
+
+    if (isNonEmptyUserValue(getPathValue(attrs, ["style", "spacing", "blockGap"]))) {
+      groups.gap = true;
+    }
+
+    if (isNonEmptyUserValue(getPathValue(attrs, ["style", "border", "radius"]))) {
+      groups.borderRadius = true;
+    }
+
+    return groups;
+  }
+
+  function isTailwindLengthValue(value) {
+    var normalized = String(value || "");
+    var arbitraryMatch = normalized.match(/^\[(.+)\]$/);
+    if (arbitraryMatch) {
+      normalized = arbitraryMatch[1];
+    }
+    return (
+      /^-?\d*\.?\d+(px|rem|em|%|vw|vh|svw|svh|lvw|lvh|dvw|dvh|ch|ex|lh|rlh)$/.test(
+        normalized,
+      ) || /^(calc|clamp|min|max)\(/.test(normalized)
+    );
+  }
+
+  function isBackgroundColorUtility(utility) {
+    var value;
+    if (!/^bg-/.test(utility)) {
+      return false;
+    }
+    value = utility.slice(3);
+    if (/^\[(url|image|position|size|length):/i.test(value)) {
+      return false;
+    }
+    if (/^\[url\(/i.test(value)) {
+      return false;
+    }
+    return !/^(auto|cover|contain|fixed|local|scroll|center|top|bottom|left|right|no-repeat|repeat|repeat-x|repeat-y|repeat-round|repeat-space|clip-|origin-|blend-)/.test(
+      value,
+    );
+  }
+
+  function classifyTailwindConflictGroup(token) {
+    var utility = normalizeTailwindUtilityPart(token);
+    var textMatch;
+
+    if (/^-?(?:p|px|py|pt|pr|pb|pl|ps|pe)-/.test(utility)) {
+      return "padding";
+    }
+    if (/^-?(?:m|mx|my|mt|mr|mb|ml|ms|me)-/.test(utility)) {
+      return "margin";
+    }
+    if (/^gap(?:-[xy])?-/.test(utility)) {
+      return "gap";
+    }
+    if (/^rounded(?:-|$)/.test(utility)) {
+      return "borderRadius";
+    }
+    if (/^text-(left|center|right|justify|start|end)$/.test(utility)) {
+      return "textAlign";
+    }
+
+    textMatch = utility.match(/^text-(.+)$/);
+    if (textMatch) {
+      if (
+        [
+          "xs",
+          "sm",
+          "base",
+          "lg",
+          "xl",
+          "2xl",
+          "3xl",
+          "4xl",
+          "5xl",
+          "6xl",
+          "7xl",
+          "8xl",
+          "9xl",
+        ].indexOf(textMatch[1]) !== -1 ||
+        isTailwindLengthValue(textMatch[1])
+      ) {
+        return "fontSize";
+      }
+      return "textColor";
+    }
+
+    if (isBackgroundColorUtility(utility)) {
+      return "backgroundColor";
+    }
+
+    return "";
+  }
+
+  function filterTailwindClassesForGutenbergAttrs(classNames, attrs, blockName) {
+    var groups = getGutenbergUserConflictGroups(attrs || {}, blockName || "");
+    var hasGroups = Object.keys(groups).length > 0;
+    if (!hasGroups) {
+      return sanitizeClassNames(classNames);
+    }
+
+    return classStringToTokenArray(sanitizeClassNames(classNames))
+      .filter(function (token) {
+        var group;
+        if (isImportantTailwindToken(token)) {
+          return true;
+        }
+        group = classifyTailwindConflictGroup(token);
+        return !group || !groups[group];
+      })
+      .join(" ");
   }
 
   function cloneResponsiveAttrs(attrs) {
@@ -722,7 +957,11 @@
         props.attributes && props.attributes[TAILWIND_ATTRIBUTE]
           ? props.attributes[TAILWIND_ATTRIBUTE]
           : {};
-      var cx = sanitizeClassNames(current.cx || "");
+      var cx = filterTailwindClassesForGutenbergAttrs(
+        current.cx || "",
+        props.attributes || {},
+        props.name,
+      );
 
       if (!cx || !hasTailwindSupport(null, props.name)) {
         return wp.element.createElement(BlockListBlock, props);
@@ -746,7 +985,11 @@
       attributes && attributes[TAILWIND_ATTRIBUTE]
         ? attributes[TAILWIND_ATTRIBUTE]
         : {};
-    var cx = sanitizeClassNames(current.cx || "");
+    var cx = filterTailwindClassesForGutenbergAttrs(
+      current.cx || "",
+      attributes || {},
+      blockType && blockType.name,
+    );
     if (!cx) {
       return extraProps;
     }
@@ -888,7 +1131,46 @@
     });
   }
 
+  function getTokenElementLabel(tokenElement) {
+    var label =
+      tokenElement.querySelector(".components-form-token-field__token-text") ||
+      tokenElement.querySelector(".components-form-token-field__token-label") ||
+      tokenElement.querySelector("[data-wp-component]");
+    var text = label ? label.textContent : tokenElement.textContent;
+    return String(text || "")
+      .replace(/^Remove\s+/i, "")
+      .replace(/\s+Remove$/i, "")
+      .trim();
+  }
+
+  function updateImportantTokenMarkers() {
+    document
+      .querySelectorAll(
+        ".twgb-tailwind-group__field .components-form-token-field__token, .twgb-svg-tailwind-field .components-form-token-field__token",
+      )
+      .forEach(function (tokenElement) {
+        var token = getTokenElementLabel(tokenElement);
+        tokenElement.classList.toggle(
+          "twgb-token--important",
+          isImportantTailwindToken(token),
+        );
+      });
+  }
+
+  var importantTokenMarkersQueued = false;
+  function queueImportantTokenMarkersUpdate() {
+    if (importantTokenMarkersQueued) {
+      return;
+    }
+    importantTokenMarkersQueued = true;
+    window.requestAnimationFrame(function () {
+      importantTokenMarkersQueued = false;
+      updateImportantTokenMarkers();
+    });
+  }
+
   wp.data.subscribe(queueOutlineIndicatorsUpdate);
+  wp.data.subscribe(queueImportantTokenMarkersUpdate);
 
   function splitClassTokens(value) {
     return sanitizeClassNamesDraft(value || "")
@@ -1115,7 +1397,20 @@
     }
 
     queueOutlineIndicatorsUpdate();
+    queueImportantTokenMarkersUpdate();
     setTimeout(queueOutlineIndicatorsUpdate, 400);
+    setTimeout(queueImportantTokenMarkersUpdate, 400);
+
+    if (document.body && window.MutationObserver) {
+      new MutationObserver(queueImportantTokenMarkersUpdate).observe(
+        document.body,
+        {
+          childList: true,
+          subtree: true,
+          characterData: true,
+        },
+      );
+    }
   });
 
   if (registerPlugin && PluginMoreMenuItem) {

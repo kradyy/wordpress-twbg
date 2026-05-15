@@ -37,8 +37,8 @@ class TWGB_Renderer {
      * Sanitize Tailwind class string – allow only safe characters.
      */
     public static function sanitize_classes( $classes ) {
-        // Tailwind classes are alphanumeric, hyphens, colons (breakpoints), slashes (fractions), dots, brackets.
-        return preg_replace( '/[^a-zA-Z0-9\s\-_:\/\.\[\]#%,]/', '', $classes );
+        // Tailwind classes are alphanumeric plus utility syntax characters, including ! for explicit overrides.
+        return preg_replace( '/[^a-zA-Z0-9\s\-_:\/\.\[\]#%,!]/', '', $classes );
     }
 
     /**

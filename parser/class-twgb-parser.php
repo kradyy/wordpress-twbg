@@ -104,11 +104,17 @@ class TWGB_Parser {
                 ];
 
             case 'core/image':
+                $image_url = $node->getAttribute( 'src' ) ?: '';
+                // Avoid broken-image placeholders when src is missing.
+                if ( '' === trim( $image_url ) ) {
+                    return null;
+                }
+
                 return [
                     'blockName'   => 'core/image',
                     'attrs'       => array_merge(
                         [
-                            'url' => $node->getAttribute( 'src' ) ?: '',
+                            'url' => $image_url,
                             'alt' => $node->getAttribute( 'alt' ) ?: '',
                         ],
                         self::tailwind_attrs( $classes )
@@ -117,12 +123,48 @@ class TWGB_Parser {
                 ];
 
             case 'twgb/core-button':
+                $button_text = trim( $node->textContent );
+                $button_url  = '';
+                $button_classes = $classes;
+
+                // Handle wrapper-first markup like:
+                // <div class="wp-block-button ..."><a class="wp-block-button__link">...</a></div>
+                if ( 'a' !== $tag && 'button' !== $tag ) {
+                    $anchor = null;
+                    foreach ( $node->childNodes as $child ) {
+                        if ( $child->nodeType === XML_ELEMENT_NODE && strtolower( $child->tagName ) === 'a' ) {
+                            $anchor = $child;
+                            break;
+                        }
+                    }
+
+                    if ( $anchor ) {
+                        $button_text = trim( $anchor->textContent );
+                        $button_url  = $anchor->getAttribute( 'href' ) ?: '';
+                        $button_classes = trim(
+                            TWGB_Renderer::sanitize_classes(
+                                $classes . ' ' . ( $anchor->getAttribute( 'class' ) ?: '' )
+                            )
+                        );
+                    }
+                } else {
+                    $button_url = $tag === 'a' ? ( $node->getAttribute( 'href' ) ?: '' ) : '';
+                }
+
+                // Remove structural Gutenberg classes from the Tailwind payload.
+                $button_classes = preg_replace(
+                    '/\b(?:wp-block-button|wp-block-button__link|wp-element-button|wp-block-buttons(?:-is-layout-flex)?|is-layout-\S+)\b/',
+                    '',
+                    $button_classes
+                );
+                $button_classes = trim( TWGB_Renderer::sanitize_classes( (string) $button_classes ) );
+
                 $button_attrs = [
-                    'text' => trim( $node->textContent ),
-                    'url'  => $tag === 'a' ? ( $node->getAttribute( 'href' ) ?: '' ) : '',
+                    'text' => $button_text,
+                    'url'  => $button_url,
                 ];
 
-                $button_attrs = array_merge( $button_attrs, self::tailwind_attrs( $classes ) );
+                $button_attrs = array_merge( $button_attrs, self::tailwind_attrs( $button_classes ) );
 
                 return [
                     'blockName'   => 'core/buttons',
@@ -187,6 +229,10 @@ class TWGB_Parser {
 
         if ( $tag === 'img' ) {
             return 'core/image';
+        }
+
+        if ( 'div' === $tag && preg_match( '/\bwp-block-button\b/', $classes ) ) {
+            return 'twgb/core-button';
         }
 
         $looks_like_button = (

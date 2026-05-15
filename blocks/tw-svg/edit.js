@@ -31,6 +31,7 @@
                         { title: __( 'SVG Settings', 'tw-gutenberg-bridge' ) },
                         wp.element.createElement( FormTokenField, {
                             label: __( 'Tailwind Classes', 'tw-gutenberg-bridge' ),
+                            className: 'twgb-svg-tailwind-field',
                             placeholder: __( 'e.g. w-full h-auto text-gray-700', 'tw-gutenberg-bridge' ),
                             value: window.twgbUtils && typeof window.twgbUtils.classStringToTokens === 'function'
                                 ? window.twgbUtils.classStringToTokens( twClasses )
